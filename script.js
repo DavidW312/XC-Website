@@ -173,8 +173,6 @@ async function calculateSeasonAnalytics(weekNames) {
 
     const genderTally = { Boys: 0, Girls: 0, noName: 0 };
     Object.values(seasonTotals).forEach(d => { if (d.gender === 'Girls') genderTally.Girls++; else genderTally.Boys++; });
-    fetch('http://127.0.0.1:7473/ingest/ca458123-607c-4225-b28a-2762101a7047',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6bf237'},body:JSON.stringify({sessionId:'6bf237',runId:'post-fix',hypothesisId:'H3-H4-H5',location:'script.js:calculateSeasonAnalytics',message:'season totals built',data:{athleteCount:Object.keys(seasonTotals).length,genderTally,sampleKeys:Object.keys(seasonTotals).slice(0,3)},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     renderSeasonUI(seasonTotals, totalTeamMiles, totalAbsences, totalActiveDaysCount);
 }
 
@@ -227,8 +225,6 @@ function renderSeasonUI(totals, teamMiles, absences, possibleDays) {
     const girlsCol = document.getElementById('girls-leaders-column');
     const boysCol = document.getElementById('boys-leaders-column');
 
-    fetch('http://127.0.0.1:7473/ingest/ca458123-607c-4225-b28a-2762101a7047',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6bf237'},body:JSON.stringify({sessionId:'6bf237',runId:'post-fix',hypothesisId:'H1-H4',location:'script.js:renderSeasonUI',message:'class leaders rendered',data:{gradeLeaderKeys:Object.keys(gradeLeaders),boysItems:boysLeadersHtml.length-1,girlsItems:girlsLeadersHtml.length-1,totalsCount:Object.keys(totals).length},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     if (girlsCol) girlsCol.innerHTML = girlsLeadersHtml.join('');
     if (boysCol) boysCol.innerHTML = boysLeadersHtml.join('');
 
@@ -273,8 +269,6 @@ async function fetchWeeklyData(tabName) {
             originalWeekData = sortMileageRows([...mergedRows]);
             currentWeekData = [...originalWeekData];
 
-            fetch('http://127.0.0.1:7473/ingest/ca458123-607c-4225-b28a-2762101a7047',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6bf237'},body:JSON.stringify({sessionId:'6bf237',runId:'post-fix',hypothesisId:'H2-H3-H5',location:'script.js:fetchWeeklyData',message:'week rows loaded',data:{tabName,rowCount:currentWeekData.length,samples:currentWeekData.slice(0,5).map((r,i)=>({i,len:r?.length,name:buildName(r),k:r?.[10],gender:parseGender(r)})),girlsCount:currentWeekData.filter(r=>parseGender(r)==='Girls').length},timestamp:Date.now()})}).catch(()=>{});
-            // #endregion
             renderMileageTable(currentWeekData);
             updateTimestamp();
         } else {
