@@ -1,5 +1,5 @@
 // Google Sheet ID: copy from docs.google.com/spreadsheets/d/{SHEET_ID}/edit
-// Required tabs: Week* (mileage; col J = grade 9–12), Race_Results (Name, Meet, Date, Time, Distance)
+// Required tabs: Week* (mileage; col J = grade, col K = gender), Race_Results (Name, Meet, Date, Time, Distance)
 const SHEET_ID = '1Y10L9EOvbB-8a3gjB-L9G5LMJ_Q70xDJsUGPlRcMHK4';
 const API_KEY = 'AIzaSyAijjbGyF0cY0BLgEa_LmkYjyL1UDnQVQ8';
 
@@ -91,6 +91,30 @@ async function initDashboard() {
     }
 }
 
+/** Pad week rows to column K and merge gender from a dedicated K-column fetch (Sheets omits trailing blanks). */
+function normalizeWeekRow(row, genderCell) {
+    const out = [...(row || [])];
+    while (out.length < 11) out.push("");
+    if (genderCell !== undefined && genderCell !== null && String(genderCell).trim() !== "") {
+        out[10] = String(genderCell).trim();
+    }
+    return out;
+}
+
+async function fetchWeekRows(tabName, startRow = 2) {
+    const enc = encodeURIComponent(`'${tabName}'`);
+    const base = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${enc}`;
+    const [mainRes, kRes] = await Promise.all([
+        fetch(`${base}!A${startRow}:K?key=${API_KEY}`),
+        fetch(`${base}!K${startRow}:K?key=${API_KEY}`)
+    ]);
+    const main = await mainRes.json();
+    const kCol = await kRes.json();
+    const rows = main.values || [];
+    const kVals = kCol.values || [];
+    return rows.map((row, i) => normalizeWeekRow(row, kVals[i]?.[0]));
+}
+
 async function calculateSeasonAnalytics(weekNames) {
     let seasonTotals = {};
     let totalTeamMiles = 0;
@@ -99,17 +123,12 @@ async function calculateSeasonAnalytics(weekNames) {
 
     const weekDaysCols = [2, 3, 4, 5, 6, 7];
 
-    const promises = weekNames.map(name =>
-        fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(name)}!A2:J?key=${API_KEY}`)
-            .then(res => res.json())
-    );
+    const allWeeksData = await Promise.all(weekNames.map(name => fetchWeekRows(name)));
 
-    const allWeeksData = await Promise.all(promises);
+    allWeeksData.forEach(weekRows => {
+        if (!weekRows || weekRows.length === 0) return;
 
-    allWeeksData.forEach(week => {
-        if (!week.values || week.values.length === 0) return;
-
-        week.values.forEach(row => {
+        weekRows.forEach(row => {
             const name = buildName(row);
             if (!name) return;
 
@@ -120,10 +139,16 @@ async function calculateSeasonAnalytics(weekNames) {
                     A: 0,
                     XA: 0,
                     INJ: 0,
-                    grade: parseGrade(row)
+                    grade: parseGrade(row),
+                    gender: parseGender(row)
                 };
-            } else if (row[9] !== undefined && row[9] !== null && String(row[9]).trim() !== '') {
-                seasonTotals[name].grade = parseGrade(row);
+            } else {
+                if (row[9] !== undefined && row[9] !== null && String(row[9]).trim() !== '') {
+                    seasonTotals[name].grade = parseGrade(row);
+                }
+                if (row[10] !== undefined && row[10] !== null && String(row[10]).trim() !== '') {
+                    seasonTotals[name].gender = parseGender(row);
+                }
             }
 
             weekDaysCols.forEach(col => {
@@ -146,6 +171,11 @@ async function calculateSeasonAnalytics(weekNames) {
         });
     });
 
+    // #region agent log
+    const genderTally = { Boys: 0, Girls: 0, noName: 0 };
+    Object.values(seasonTotals).forEach(d => { if (d.gender === 'Girls') genderTally.Girls++; else genderTally.Boys++; });
+    fetch('http://127.0.0.1:7473/ingest/ca458123-607c-4225-b28a-2762101a7047',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6bf237'},body:JSON.stringify({sessionId:'6bf237',runId:'post-fix',hypothesisId:'H3-H4-H5',location:'script.js:calculateSeasonAnalytics',message:'season totals built',data:{athleteCount:Object.keys(seasonTotals).length,genderTally,sampleKeys:Object.keys(seasonTotals).slice(0,3)},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     renderSeasonUI(seasonTotals, totalTeamMiles, totalAbsences, totalActiveDaysCount);
 }
 
@@ -166,7 +196,7 @@ function renderSeasonUI(totals, teamMiles, absences, possibleDays) {
 
     const gradeLeaders = {};
     Object.entries(totals).forEach(([name, data]) => {
-        const gender = getGender(name);
+        const gender = data.gender || "Boys";
         const grade = data.grade;
         const uniqueKey = `${gender}|${grade === null ? 'none' : grade}`;
 
@@ -181,7 +211,7 @@ function renderSeasonUI(totals, teamMiles, absences, possibleDays) {
             return gradeSortKey(a.grade) - gradeSortKey(b.grade);
         })
         .forEach(leader => {
-            const gradeLabel = formatGradeLabel(leader.grade);
+            const gradeLabel = leader.grade === null ? "Unassigned" : formatGradeLabel(leader.grade);
             const itemHtml = `
             <p style="margin: 3px 0; font-size: 0.85rem;">
                 <span style="font-weight: bold;">${gradeLabel}:</span>
@@ -197,6 +227,9 @@ function renderSeasonUI(totals, teamMiles, absences, possibleDays) {
 
     const girlsCol = document.getElementById('girls-leaders-column');
     const boysCol = document.getElementById('boys-leaders-column');
+    // #region agent log
+    fetch('http://127.0.0.1:7473/ingest/ca458123-607c-4225-b28a-2762101a7047',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6bf237'},body:JSON.stringify({sessionId:'6bf237',runId:'post-fix',hypothesisId:'H1-H4',location:'script.js:renderSeasonUI',message:'class leaders rendered',data:{gradeLeaderKeys:Object.keys(gradeLeaders),boysItems:boysLeadersHtml.length-1,girlsItems:girlsLeadersHtml.length-1,totalsCount:Object.keys(totals).length},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     if (girlsCol) girlsCol.innerHTML = girlsLeadersHtml.join('');
     if (boysCol) boysCol.innerHTML = boysLeadersHtml.join('');
 
@@ -231,16 +264,18 @@ async function fetchWeeklyData(tabName) {
     const container = document.getElementById('mileage-container');
     container.innerHTML = `<p>Loading ${tabName}...</p>`;
 
-    const encodedTabName = encodeURIComponent(`'${tabName}'`);
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodedTabName}!A1:J?key=${API_KEY}`;
-
     try {
-        const response = await fetch(url);
-        const data = await response.json();
+        const enc = encodeURIComponent(`'${tabName}'`);
+        const headerRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${enc}!A1:K?key=${API_KEY}`);
+        const headerData = await headerRes.json();
+        const mergedRows = await fetchWeekRows(tabName, 2);
 
-        if (data.values && data.values.length > 0) {
-            originalWeekData = data.values.slice(1);
+        if (headerData.values && headerData.values.length > 0 && mergedRows.length > 0) {
+            originalWeekData = sortMileageRows([...mergedRows]);
             currentWeekData = [...originalWeekData];
+            // #region agent log
+            fetch('http://127.0.0.1:7473/ingest/ca458123-607c-4225-b28a-2762101a7047',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6bf237'},body:JSON.stringify({sessionId:'6bf237',runId:'post-fix',hypothesisId:'H2-H3-H5',location:'script.js:fetchWeeklyData',message:'week rows loaded',data:{tabName,rowCount:currentWeekData.length,samples:currentWeekData.slice(0,5).map((r,i)=>({i,len:r?.length,name:buildName(r),k:r?.[10],gender:parseGender(r)})),girlsCount:currentWeekData.filter(r=>parseGender(r)==='Girls').length},timestamp:Date.now()})}).catch(()=>{});
+            // #endregion
             renderMileageTable(currentWeekData);
             updateTimestamp();
         } else {
@@ -251,23 +286,30 @@ async function fetchWeeklyData(tabName) {
     }
 }
 
+function compareByLastName(a, b) {
+    const lastCmp = String(a[0] || "").trim().localeCompare(String(b[0] || "").trim(), undefined, { sensitivity: "base" });
+    if (lastCmp !== 0) return lastCmp;
+    return String(a[1] || "").trim().localeCompare(String(b[1] || "").trim(), undefined, { sensitivity: "base" });
+}
+
+function sortMileageRows(rows) {
+    return [...rows].sort((a, b) => {
+        const gradeDiff = gradeSortKey(parseGrade(a)) - gradeSortKey(parseGrade(b));
+        if (gradeDiff !== 0) return gradeDiff;
+        return compareByLastName(a, b);
+    });
+}
+
 function renderMileageTable(rows) {
     const container = document.getElementById('mileage-container');
 
-    const sortedRows = [...rows].sort((a, b) => {
-        const genA = getGender(buildName(a));
-        const genB = getGender(buildName(b));
-        if (genA !== genB) return genA.localeCompare(genB);
-        const gradeDiff = gradeSortKey(parseGrade(a)) - gradeSortKey(parseGrade(b));
-        if (gradeDiff !== 0) return gradeDiff;
-        return buildName(a).localeCompare(buildName(b));
-    });
-
     const weekdayCols = [2, 3, 4, 5, 6, 7];
-    const activeWeekdays = {};
-    weekdayCols.forEach(colIdx => {
-        activeWeekdays[colIdx] = rows.some(row => row[colIdx] && row[colIdx].toString().trim() !== '');
-    });
+    const colCount = 1 + weekdayCols.length + 1;
+
+    const genderSections = [
+        { label: "Boys", gender: "Boys" },
+        { label: "Girls", gender: "Girls" }
+    ];
 
     let htmlContent = `
         <table class="mileage-table">
@@ -280,29 +322,76 @@ function renderMileageTable(rows) {
             </thead>
             <tbody>`;
 
-    sortedRows.forEach(row => {
-        if (!Array.isArray(row) || row.length < 2) return;
+    const sectionCounts = { Boys: 0, Girls: 0 };
 
-        const name = buildName(row);
-        if (!name) return;
+    genderSections.forEach(section => {
 
-        const totalMiles = getMileageValue(row[8]);
+        // IMPORTANT FIX:
+        // Preserve incoming row order instead of always re-sorting
+        const sectionRows = rows.filter(row =>
+            Array.isArray(row) &&
+            row.length >= 2 &&
+            buildName(row) &&
+            parseGender(row) === section.gender
+        );
 
-        htmlContent += `<tr>
-            <td class="name-cell">${cleanName(name)}</td>`;
+        sectionCounts[section.gender] = sectionRows.length;
 
-        weekdayCols.forEach(colIdx => {
-            let val = (row[colIdx] != null) ? String(row[colIdx]).trim() : '';
-            if (val === "" && activeWeekdays[colIdx]) val = "P";
-            const cellClass = getStatusClass(val);
-            htmlContent += `<td class="${cellClass}">${val}</td>`;
+        htmlContent += `<tr class="group-header-row"><td colspan="${colCount}">${section.label}</td></tr>`;
+
+        if (sectionRows.length === 0) {
+            htmlContent += `<tr><td colspan="${colCount}" style="text-align:center;color:#888;padding:12px;">No athletes in this section</td></tr>`;
+            return;
+        }
+
+        sectionRows.forEach(row => {
+            const name = buildName(row);
+            const totalMiles = getMileageValue(row[8]);
+
+            htmlContent += `<tr>
+                <td class="name-cell">${cleanName(name)}</td>`;
+
+            weekdayCols.forEach(colIdx => {
+                const val = (row[colIdx] != null)
+                    ? String(row[colIdx]).trim()
+                    : '';
+
+                const cellClass = getStatusClass(val);
+
+                htmlContent += `<td class="${cellClass}">${val}</td>`;
+            });
+
+            htmlContent += `
+                <td class="total-cell">${totalMiles.toFixed(1)}</td>
+            </tr>`;
         });
-
-        htmlContent += `<td class="total-cell">${totalMiles.toFixed(1)}</td></tr>`;
     });
 
     htmlContent += "</tbody></table>";
     container.innerHTML = htmlContent;
+
+    // #region agent log
+    fetch('http://127.0.0.1:7473/ingest/ca458123-607c-4225-b28a-2762101a7047',{
+        method:'POST',
+        headers:{
+            'Content-Type':'application/json',
+            'X-Debug-Session-Id':'6bf237'
+        },
+        body:JSON.stringify({
+            sessionId:'6bf237',
+            runId:'post-fix',
+            hypothesisId:'H1-H3',
+            location:'script.js:renderMileageTable',
+            message:'mileage sections rendered',
+            data:{
+                inputRows:rows.length,
+                sectionCounts,
+                headersShown:{Boys:true,Girls:true}
+            },
+            timestamp:Date.now()
+        })
+    }).catch(()=>{});
+    // #endregion
 }
 
 window.sortMileage = function() {
@@ -312,7 +401,7 @@ window.sortMileage = function() {
 };
 
 window.resetSort = function() {
-    currentWeekData = [...originalWeekData];
+    currentWeekData = sortMileageRows([...originalWeekData]);
     renderMileageTable(currentWeekData);
 };
 
@@ -481,6 +570,24 @@ function parseGrade(row) {
     return num;
 }
 
+/** Column K: gender (F/G for girls, M/B for boys). Defaults to Boys if blank. */
+function parseGender(row) {
+    if (!row) return "Boys";
+    if (row[10] !== undefined && row[10] !== null) {
+        const raw = String(row[10]).trim();
+        if (raw) {
+            const u = raw.toUpperCase();
+            if (u === "F" || u === "FEMALE" || u === "G" || u === "GIRL" || u === "GIRLS") {
+                return "Girls";
+            }
+            return "Boys";
+        }
+    }
+    const name = buildName(row);
+    if (name && name.includes("(F)")) return "Girls";
+    return "Boys";
+}
+
 function gradeSortKey(grade) {
     return grade === null ? 999 : grade;
 }
@@ -493,10 +600,6 @@ function buildName(row) {
     const last = row[0] || "";
     const first = row[1] || "";
     return `${first} ${last}`.trim();
-}
-
-function getGender(name) {
-    return name && name.includes("(F)") ? "Girls" : "Boys";
 }
 
 function cleanName(name) {

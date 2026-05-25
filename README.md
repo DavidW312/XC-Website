@@ -1,6 +1,6 @@
 # XC Team Dashboard
 
-A static website for cross country summer mileage and meet results, powered by Google Sheets.
+A static website for cross country summer mileage and meet results (Google Sheets Database).
 
 ### Required tabs
 
@@ -18,8 +18,11 @@ A static website for cross country summer mileage and meet results, powered by G
 | C–H | Mon–Sat (miles, or `A` / `XA` / `INJ` for absences) |
 | I | Weekly total |
 | J | Grade (number: `9`, `10`, `11`, or `12`) |
+| K | Gender (`F` or `G` for girls, `M` or `B` for boys) |
 
 Enter grade as a plain number in column J (not "11th" or "Junior"). Leave blank if unknown; those athletes sort last and show **—** on the leaderboard.
+
+Enter gender in column K once per athlete (you can copy down each week). Use `F` or `G` for girls and `M` or `B` for boys. Leave blank to default to boys.
 
 ### Race_Results columns
 
