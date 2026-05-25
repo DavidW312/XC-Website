@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>XC Team Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="xc-wrapper">
+        <header>
+            <h1>XC Team Dashboard</h1>
+            <p>Summer mileage and meet results for <strong>Cross Country</strong></p>
+            <p id="last-updated" style="font-size: 0.8rem; opacity: 0.8; font-style: italic;">Loading status...</p>
+        </header>
+
+        <div class="view-controls">
+            <button class="view-btn active" data-section="all">Dashboard View</button>
+            <button class="view-btn active" data-section="mileage">Weekly Mileage</button>
+            <button class="view-btn active" data-section="season">Season Insights</button>
+            <button class="view-btn active" data-section="results">Meet Results</button>
+        </div>
+
+        <main>
+            <section id="mileage-section">
+                <h2>Summer Weekly Mileage</h2>
+                <div class="controls">
+                    <label for="week-selector">View Week:</label>
+                    <select id="week-selector"></select>
+                    <button onclick="sortMileage()" class="sort-btn">Sort by Highest Mileage</button>
+                    <button onclick="resetSort()" class="reset-btn">Reset Order</button>
+                </div>
+                <div id="mileage-container">
+                    <p>Loading mileage data...</p>
+                </div>
+            </section>
+
+            <section id="season-insights-section" style="flex: 1 1 100%;">
+                <h2>Season Insights</h2>
+                <div class="insights-grid">
+                    <div class="insight-card">
+                        <h3>Total Team Miles</h3>
+                        <p id="total-team-miles">0</p>
+                    </div>
+                    <div class="insight-card">
+                        <h3>Attendance Health</h3>
+                        <p id="attendance-stat">0%</p>
+                    </div>
+                    <div class="insight-card group-leaders-wide">
+                        <h3>Class Leaders</h3>
+                        <div class="gender-split-container">
+                            <div id="girls-leaders-column"></div>
+                            <div id="boys-leaders-column"></div>
+                        </div>
+                    </div>
+                </div>
+                <div id="season-leaderboard-container"></div>
+            </section>
+
+            <section id="results-section">
+                <h2>Meet Results</h2>
+                <div class="controls meet-controls">
+                    <label for="xc-meet-selector">Select Meet</label>
+                    <div class="custom-select-wrapper">
+                        <select id="xc-meet-selector" onchange="displaySelectedMeet()">
+                            <option value="">Loading meets...</option>
+                        </select>
+                        <span class="select-arrow">▾</span>
+                    </div>
+
+                    <div class="meet-results-controls" id="meet-results-controls" style="display: none;">
+                        <input type="text" id="xc-meet-search" placeholder="Search athlete..." onkeyup="filterMeetResults()">
+                        <button class="reset-btn small-reset" onclick="resetMeetSort()">Reset Sort & Search</button>
+                    </div>
+                </div>
+                <div id="meet-results-container"></div>
+            </section>
+        </main>
+    </div>
+
+    <div id="chart-overlay" onclick="closeChart()" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:999;"></div>
+
+    <div id="chart-modal" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); background:white; padding:30px 20px 20px 20px; border-radius:12px; z-index:1000; width:90%; max-width:600px; max-height: 90vh; overflow-y: auto; box-sizing: border-box; box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
+        <button onclick="closeChart()" style="position: absolute; top: 15px; right: 15px; cursor:pointer; background:chocolate; color:white; border:none; border-radius:4px; padding:6px 12px; font-weight:bold; z-index: 1001;">X</button>
+        <h3 id="chart-title" style="color:chocolate; margin:0 0 15px 0; font-size: 1.4rem; text-align: center; width: 100%; display: block;">Athlete Name</h3>
+        <div id="chart-content-wrapper" style="display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%;">
+            <div id="chart-container-inner" style="position: relative; height: 50vh; min-height: 250px; width: 100%;">
+                <canvas id="progressionChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
