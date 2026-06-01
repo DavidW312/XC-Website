@@ -74,6 +74,9 @@ th {
     text-align: center;
     text-transform: uppercase;
     letter-spacing: 1px;
+    position: sticky;
+    top: 0;
+    z-index: 10;
 }
 
 td {
@@ -88,6 +91,10 @@ td {
     font-weight: bold;
     color: #333;
     background-color: #fffaf0;
+    cursor: pointer;
+    pointer-events: auto;
+    position: relative;
+    z-index: 5;
 }
 
 .total-cell {
@@ -130,6 +137,48 @@ thead tr:hover {
     font-size: 0.85rem;
     font-weight: 600;
     color: #1e8449; /* darker green */
+}
+
+#pr-search {
+    width: 100%;
+    padding: 10px;
+    margin-bottom: 15px;
+    border: 1px solid chocolate;
+    border-radius: 4px;
+    box-sizing: border-box;
+}
+
+/* Force the sort headers and buttons to accept clicks and change cursor */
+#pr-container th, 
+#pr-container button.mini-sort {
+    cursor: pointer !important;
+    pointer-events: auto !important;
+    position: relative;
+    z-index: 10; /* Lifts them above sneaky invisible containers */
+}
+
+/* ==========================================================================
+   PR TABLE VISUAL ISOLATION & FIXES
+   ========================================================================== */
+
+/* Stop mileage group header styling from leaking into the PR container */
+#pr-container .group-header-row td,
+#pr-container tr.group-header-row {
+    background: none !important;
+    color: inherit !important;
+    position: static !important;
+}
+
+/* Ensure PR headers keep their dedicated chocolate background and white text */
+#pr-container thead {
+    background-color: chocolate !important;
+    color: white !important;
+}
+
+#pr-container th {
+    background-color: chocolate !important;
+    color: white !important;
+    text-transform: uppercase;
 }
 
 /* ==========================================
@@ -486,6 +535,7 @@ thead tr:hover {
 /* Maximum Heights for "Windows" */
 #mileage-container { max-height: 770px; }
 #season-leaderboard-container { max-height: 565px; }
+#pr-container { max-height: 850px; }
 #meet-results-container { max-height: 725px; min-height: 400px; }
 
 /* Sticky Main Table Header */
@@ -643,3 +693,155 @@ th.sortable.active-desc::after {
     }
 }
 
+/* ==========================================================================
+   PR TABLE HORIZONTAL LIMIT & CONTAINMENT
+   ========================================================================== */
+
+/* 1. Prevent the container from expanding past its parent grid column */
+.table-scroll-container {
+    width: 100%;
+    overflow-x: auto;  /* Allows swipe/scroll if columns get squeezed */
+    overflow-y: auto;  /* Keeps vertical scrolling intact */
+    max-height: 745px; /* Matches your season-leaderboard window height */
+    border: 1px solid #eee;
+    border-radius: 8px;
+    box-sizing: border-box;
+}
+
+/* 2. Force the table inside it to respect layout boundaries */
+.table-scroll-container table {
+    width: 100%;
+    table-layout: fixed; /* CRITICAL: Forces columns to share width equally */
+    margin-top: 0;       /* Flushes beautifully against the container header */
+}
+
+/* 3. Give explicit column widths so names have space but numbers don't stretch */
+.table-scroll-container th:nth-child(1),
+.table-scroll-container td:nth-child(1) {
+    width: 30%;          /* Gives the Athlete Name column more breathing room */
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    overflow: hidden;    /* Safely clips freakishly long names */
+}
+
+/* Split the remaining 70% of table real estate evenly among the 5 time columns */
+.table-scroll-container th:not(:nth-child(1)),
+.table-scroll-container td:not(:nth-child(1)) {
+    width: 14%;
+}
+
+/* Container box keeping the PR panel locked into the dashboard grid */
+.table-scroll-container {
+    width: 100% !important;
+    max-width: 100% !important;
+    overflow-x: auto !important; 
+    overflow-y: auto;
+    max-height: 565px;
+    border: 1px solid #eee;
+    border-radius: 8px;
+    box-sizing: border-box;
+    display: block; /* Forces full structural block footprint */
+}
+
+/* Force the internal table to occupy 100% of the card slot width */
+.table-scroll-container table {
+    width: 100% !important;
+    max-width: 100% !important;
+    table-layout: fixed !important; 
+    border-collapse: collapse;
+}
+
+/* Lock Name Column to 30% width */
+#pr-container th:nth-child(1),
+#pr-container td:nth-child(1) {
+    width: 30% !important;
+    text-align: left;
+    padding-left: 10px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Split the remaining 70% perfectly among the 5 race time event slots (14% each) */
+#pr-container th:not(:nth-child(1)),
+#pr-container td:not(:nth-child(1)) {
+    width: 14% !important;
+    text-align: center;
+}
+
+/* Force the progression canvas layout to fill out the modal space fully */
+#chart-content-wrapper {
+    width: 100% !important;
+    min-width: 300px; /* Adjust based on preference, prevents micro-collapsing */
+    position: relative;
+    margin: 0 auto;
+}
+
+#progressionChart {
+    width: 100% !important;
+    height: 300px !important; /* Forces standard visibility depth */
+}
+
+/* ==========================================================================
+   STYLING LEAK ISOLATION & POPUP TABS
+   ========================================================================== */
+
+/* Prevent sticky header leaks from other tables overlaying the PR or modal elements */
+#pr-container thead th {
+    position: static !important; /* Strips sticky behavior from the PR summary view */
+    z-index: 1 !important;
+}
+
+/* Ensure the chart modal and overlay explicitly layer over EVERYTHING else on the screen */
+#chart-overlay {
+    position: fixed !important;
+    top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0, 0, 0, 0.6) !important;
+    z-index: 999999 !important;
+}
+
+#chart-modal {
+    position: fixed !important;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%) !important;
+    z-index: 1000000 !important;
+    background: white !important;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.3) !important;
+    border-radius: 12px;
+    padding: 20px;
+    width: 90%;
+    max-width: 650px;
+}
+
+/* Modal Distance Selection Tabs */
+.modal-tabs {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    margin: 10px 0 20px 0;
+    border-bottom: 2px solid #f4e7df;
+    padding-bottom: 8px;
+    flex-wrap: wrap;
+}
+
+.tab-btn {
+    padding: 6px 14px;
+    font-size: 0.85rem;
+    font-weight: bold;
+    border: 2px solid #e6c2a6;
+    background: #fffaf5;
+    color: #8b4513;
+    border-radius: 20px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.tab-btn:hover {
+    background: #ecd4c8;
+}
+
+.tab-btn.active {
+    background: chocolate;
+    color: white;
+    border-color: chocolate;
+}

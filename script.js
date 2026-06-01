@@ -3,14 +3,28 @@
 const SHEET_ID = '1Y10L9EOvbB-8a3gjB-L9G5LMJ_Q70xDJsUGPlRcMHK4';
 const API_KEY = 'AIzaSyAijjbGyF0cY0BLgEa_LmkYjyL1UDnQVQ8';
 
+// --- GLOBAL DECLARATIONS & ENGINE STATES ---
 let currentWeekData = [];
 let originalWeekData = [];
 let meetData = [];
 let meetSortState = { column: null, ascending: true };
 
+// PR Engine Core States
+let allDistancePRs = [];
+let distancePRSortState = { column: null, ascending: true };
+
+// Strict Distance Configuration for the Progression Chart
+const CHART_EVENT_CONFIGS = {
+    distance: [
+        { key: "xc_time", label: "Race Time Progression", type: "time" }
+    ]
+};
+
+// --- INITIALIZATION ---
 window.addEventListener("DOMContentLoaded", async () => {
     await initDashboard();
     await fetchRaceResults();
+    await fetchPRs();
     displaySelectedMeet();
     initAdvancedToggleView();
 });
@@ -22,6 +36,7 @@ function initAdvancedToggleView() {
     const sectionMap = {
         mileage: document.getElementById("mileage-section"),
         season: document.getElementById("season-insights-section"),
+        pr: document.getElementById("pr-section"),
         results: document.getElementById("results-section")
     };
 
@@ -91,7 +106,6 @@ async function initDashboard() {
     }
 }
 
-/** Pad week rows to column K and merge gender from a dedicated K-column fetch (Sheets omits trailing blanks). */
 function normalizeWeekRow(row, genderCell) {
     const out = [...(row || [])];
     while (out.length < 11) out.push("");
@@ -122,7 +136,6 @@ async function calculateSeasonAnalytics(weekNames) {
     let totalActiveDaysCount = 0;
 
     const weekDaysCols = [2, 3, 4, 5, 6, 7];
-
     const allWeeksData = await Promise.all(weekNames.map(name => fetchWeekRows(name)));
 
     allWeeksData.forEach(weekRows => {
@@ -171,8 +184,6 @@ async function calculateSeasonAnalytics(weekNames) {
         });
     });
 
-    const genderTally = { Boys: 0, Girls: 0, noName: 0 };
-    Object.values(seasonTotals).forEach(d => { if (d.gender === 'Girls') genderTally.Girls++; else genderTally.Boys++; });
     renderSeasonUI(seasonTotals, totalTeamMiles, totalAbsences, totalActiveDaysCount);
 }
 
@@ -267,6 +278,7 @@ function renderSeasonUI(totals, teamMiles, absences, possibleDays) {
     }
 }
 
+
 async function fetchWeeklyData(tabName) {
     const container = document.getElementById('mileage-container');
     container.innerHTML = `<p>Loading ${tabName}...</p>`;
@@ -307,7 +319,6 @@ function sortMileageRows(rows) {
 
 function renderMileageTable(rows) {
     const container = document.getElementById('mileage-container');
-
     const weekdayCols = [2, 3, 4, 5, 6, 7];
     const colCount = 1 + weekdayCols.length + 1;
 
@@ -327,20 +338,13 @@ function renderMileageTable(rows) {
             </thead>
             <tbody>`;
 
-    const sectionCounts = { Boys: 0, Girls: 0 };
-
     genderSections.forEach(section => {
-
-        // IMPORTANT FIX:
-        // Preserve incoming row order instead of always re-sorting
         const sectionRows = rows.filter(row =>
             Array.isArray(row) &&
             row.length >= 2 &&
             buildName(row) &&
             parseGender(row) === section.gender
         );
-
-        sectionCounts[section.gender] = sectionRows.length;
 
         htmlContent += `<tr class="group-header-row"><td colspan="${colCount}">${section.label}</td></tr>`;
 
@@ -357,24 +361,17 @@ function renderMileageTable(rows) {
                 <td class="name-cell">${cleanName(name)}</td>`;
 
             weekdayCols.forEach(colIdx => {
-                const val = (row[colIdx] != null)
-                    ? String(row[colIdx]).trim()
-                    : '';
-
+                const val = (row[colIdx] != null) ? String(row[colIdx]).trim() : '';
                 const cellClass = getStatusClass(val);
-
                 htmlContent += `<td class="${cellClass}">${val}</td>`;
             });
 
-            htmlContent += `
-                <td class="total-cell">${totalMiles.toFixed(1)}</td>
-            </tr>`;
+            htmlContent += `<td class="total-cell">${totalMiles.toFixed(1)}</td></tr>`;
         });
     });
 
     htmlContent += "</tbody></table>";
     container.innerHTML = htmlContent;
-
 }
 
 window.sortMileage = function() {
@@ -387,6 +384,133 @@ window.resetSort = function() {
     currentWeekData = sortMileageRows([...originalWeekData]);
     renderMileageTable(currentWeekData);
 };
+
+
+// --- PERSONAL RECORDS (PR) ENGINE ---
+
+async function fetchPRs() {
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/PRs!A1:F?key=${API_KEY}`;
+    try {
+        const response = await fetch(url);
+        const data = await response.json();
+        if (data.values) {
+            allDistancePRs = data.values; // Assigned smoothly into explicit scope
+            renderPRTable(orderedDistancePRRows(allDistancePRs));
+            return true;
+        }
+    } catch (e) { 
+        console.error("PR Fetch Error:", e); 
+        return false; 
+    }
+}
+
+function orderedDistancePRRows(rows) {
+    if (!rows || rows.length === 0) return [];
+    let data = rows.filter(row => row && row[0] && row[0].trim().toLowerCase() !== "name");
+    
+    if (distancePRSortState.column === null || distancePRSortState.column === undefined) {
+        return data;
+    }
+
+    const columnIndex = distancePRSortState.column;
+    const ascending = distancePRSortState.ascending;
+
+    return [...data].sort((a, b) => {
+        if (columnIndex === 0) {
+            const nameA = String(a[0] || "").toLowerCase().trim();
+            const nameB = String(b[0] || "").toLowerCase().trim();
+            return ascending ? nameA.localeCompare(nameB) : nameB.localeCompare(nameA);
+        }
+        const emptyA = isMissingTrackTime(a[columnIndex]);
+        const emptyB = isMissingTrackTime(b[columnIndex]);
+        if (emptyA && emptyB) return 0;
+        if (emptyA) return 1;
+        if (emptyB) return -1;
+        const timeA = timeToSeconds(a[columnIndex]);
+        const timeB = timeToSeconds(b[columnIndex]);
+        return ascending ? timeA - timeB : timeB - timeA;
+    });
+}
+
+function renderPRTable(rowsToRender) {
+    const container = document.getElementById('pr-container');
+    if (!container) return;
+
+    const data = rowsToRender || allDistancePRs;
+    const dataRows = data.filter(row => row[0] && row[0].trim().toLowerCase() !== "name");
+
+    const getArrow = (col) => {
+        if (distancePRSortState.column !== col) return "⇅";
+        return distancePRSortState.ascending ? "▲" : "▼";
+    };
+
+    let html = `<table>
+                <thead>
+                    <tr>
+                        <th onclick="sortPRs(0)" style="cursor:pointer">Name ${getArrow(0)}</th>
+                        <th>3 Mile <button class="mini-sort" onclick="sortPRs(1)">${getArrow(1)}</button></th>
+                        <th>5K <button class="mini-sort" onclick="sortPRs(2)">${getArrow(2)}</button></th>
+                        <th>2 Mile <button class="mini-sort" onclick="sortPRs(3)">${getArrow(3)}</button></th>
+                        <th>3200 <button class="mini-sort" onclick="sortPRs(4)">${getArrow(4)}</button></th>
+                        <th>1600 <button class="mini-sort" onclick="sortPRs(5)">${getArrow(5)}</button></th>
+                    </tr>
+                </thead>
+                <tbody>`;
+
+    if (dataRows.length === 0) {
+        html += `<tr><td colspan="6" style="text-align:center; padding:20px;">No athlete data found. Check your 'PRs' tab.</td></tr>`;
+    } else {
+        dataRows.forEach(row => {
+            const safeName = (row[0] || "").replace(/'/g, "\\'");
+            html += `<tr>
+                <td class="name-cell" 
+                    style="cursor:pointer; color:chocolate; text-decoration:underline;" 
+                    onclick="window.showAthleteChart('${safeName}')">
+                    ${cleanName(row[0])}
+                </td>
+                <td>${row[1] || '--'}</td>
+                <td>${row[2] || '--'}</td>
+                <td>${row[3] || '--'}</td>
+                <td>${row[4] || '--'}</td>
+                <td>${row[5] || '--'}</td>
+            </tr>`;
+        });
+    }
+
+    html += "</tbody></table>";
+    container.innerHTML = html;
+}
+
+window.sortPRs = function(columnIndex) {
+    const dataOnly = allDistancePRs.filter(row => row[0] && row[0].trim().toLowerCase() !== "name");
+    if (dataOnly.length === 0) return;
+
+    if (distancePRSortState.column === columnIndex) {
+        distancePRSortState.ascending = !distancePRSortState.ascending;
+    } else {
+        distancePRSortState.column = columnIndex;
+        distancePRSortState.ascending = true;
+    }
+    renderPRTable(orderedDistancePRRows(allDistancePRs));
+};
+
+window.filterPRs = function() {
+    const searchInput = document.getElementById('pr-search');
+    const searchTerm = searchInput ? searchInput.value.toLowerCase().trim() : "";
+    const dataOnly = allDistancePRs.filter(row => row[0] && row[0].trim().toLowerCase() !== "name");
+    const filtered = dataOnly.filter(row => row[0] && row[0].toLowerCase().includes(searchTerm));
+    renderPRTable(orderedDistancePRRows(filtered));
+};
+
+window.resetPRs = function() {
+    const searchInput = document.getElementById('pr-search');
+    if (searchInput) searchInput.value = "";
+    distancePRSortState = { column: null, ascending: true };
+    renderPRTable(orderedDistancePRRows(allDistancePRs));
+};
+
+
+// --- MEET RESULTS ENGINE ---
 
 async function fetchRaceResults() {
     const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/Race_Results!A2:E?key=${API_KEY}`;
@@ -411,15 +535,14 @@ async function fetchRaceResults() {
 
         const sortedMeets = Object.values(meetMap).sort((a, b) => a.ts - b.ts).map(o => o.name);
         const selector = document.getElementById('xc-meet-selector');
-
-        selector.innerHTML = sortedMeets.map(m => `<option value="${m}">${m}</option>`).join('');
-
-        if (sortedMeets.length > 0) {
-            selector.value = sortedMeets[sortedMeets.length - 1];
-            document.getElementById('meet-results-controls').style.display = 'block';
-            displaySelectedMeet();
+        if (selector) {
+            selector.innerHTML = sortedMeets.map(m => `<option value="${m}">${m}</option>`).join('');
+            if (sortedMeets.length > 0) {
+                selector.value = sortedMeets[sortedMeets.length - 1];
+                document.getElementById('meet-results-controls').style.display = 'block';
+                displaySelectedMeet();
+            }
         }
-
         updateTimestamp();
     } catch (error) {
         console.error("Meet Fetch Error:", error);
@@ -428,8 +551,10 @@ async function fetchRaceResults() {
 
 window.displaySelectedMeet = function() {
     const selector = document.getElementById('xc-meet-selector');
+    if (!selector) return;
     const selectedMeet = selector.value;
     const container = document.getElementById('meet-results-container');
+    if (!container) return;
 
     if (!selectedMeet) {
         container.innerHTML = "<p>Select a meet to view results.</p>";
@@ -439,24 +564,14 @@ window.displaySelectedMeet = function() {
     const meetRows = meetData.filter(row => row[1] === selectedMeet);
     const distanceLabel = meetRows.find(r => r[4] && String(r[4]).trim())?.[4] || "";
 
-    let html = `<div class="meet-summary">
-        <h3>${selectedMeet}</h3>
-        ${distanceLabel ? `<p><strong>Distance:</strong> ${distanceLabel}</p>` : ""}
-    </div>`;
-
-    html += `<table><thead><tr>
-        <th class="sortable" onclick="sortMeetResults(0)">Athlete</th>
-        <th class="sortable" onclick="sortMeetResults(1)">Time</th>
-    </tr></thead><tbody>`;
+    let html = `<div class="meet-summary"><h3>${selectedMeet}</h3>${distanceLabel ? `<p><strong>Distance:</strong> ${distanceLabel}</p>` : ""}</div>`;
+    html += `<table><thead><tr><th class="sortable" onclick="sortMeetResults(0)">Athlete</th><th class="sortable" onclick="sortMeetResults(1)">Time</th></tr></thead><tbody>`;
 
     if (meetRows.length === 0) {
         html += `<tr><td colspan="2" style="text-align:center; padding:20px;">No results for this meet.</td></tr>`;
     } else {
         meetRows.forEach(row => {
-            html += `<tr>
-                <td class="name-cell">${cleanName(row[0] || "")}</td>
-                <td>${row[3] || '-'}</td>
-            </tr>`;
+            html += `<tr><td class="name-cell">${cleanName(row[0] || "")}</td><td>${row[3] || '-'}</td></tr>`;
         });
     }
 
@@ -465,11 +580,11 @@ window.displaySelectedMeet = function() {
 };
 
 window.filterMeetResults = function() {
-    const searchTerm = document.getElementById('xc-meet-search').value.toLowerCase().trim();
     const container = document.getElementById('meet-results-container');
-    const table = container.querySelector('table');
+    const table = container ? container.querySelector('table') : null;
     if (!table) return;
 
+    const searchTerm = document.getElementById('xc-meet-search').value.toLowerCase().trim();
     const rows = table.querySelectorAll('tbody tr');
     rows.forEach(row => {
         const nameCell = row.querySelector('.name-cell');
@@ -481,7 +596,7 @@ window.filterMeetResults = function() {
 
 window.sortMeetResults = function(columnIndex) {
     const container = document.getElementById('meet-results-container');
-    const table = container.querySelector('table');
+    const table = container ? container.querySelector('table') : null;
     if (!table) return;
 
     if (meetSortState.column === columnIndex) {
@@ -515,7 +630,6 @@ window.sortMeetResults = function(columnIndex) {
 function getSortValue(row, colIndex) {
     const cells = row.querySelectorAll('td');
     if (cells.length <= colIndex) return '';
-
     let text = cells[colIndex].textContent.trim();
     if (colIndex >= 1) return timeToSeconds(text) || 999999;
     return text;
@@ -538,60 +652,22 @@ window.resetMeetSort = function() {
     displaySelectedMeet();
 };
 
-window.closeChart = function() {
-    document.getElementById('chart-modal').style.display = 'none';
-    document.getElementById('chart-overlay').style.display = 'none';
-};
 
-/** Column J: numeric grade (e.g. 9, 10, 11, 12). Returns null if missing/invalid. */
-function parseGrade(row) {
-    if (!row || row[9] === undefined || row[9] === null) return null;
-    const raw = String(row[9]).trim();
-    if (!raw) return null;
-    const num = parseInt(raw, 10);
-    if (isNaN(num)) return null;
-    return num;
-}
+// --- UTILITY & HELPER FUNCTIONS ---
+function cleanName(name) { return name ? name.replace("(F)", "").trim() : ""; }
+function getMileageValue(val) { let num = parseFloat(val); return isNaN(num) ? 0 : num; }
+function parseGrade(row) { if (!row || row[9] === undefined || row[9] === null) return null; const raw = String(row[9]).trim(); if (!raw) return null; const num = parseInt(raw, 10); return isNaN(num) ? null : num; }
+function gradeSortKey(grade) { return grade === null ? 999 : grade; }
+function formatGradeLabel(grade) { return grade === null ? '—' : String(grade); }
+function buildName(row) { return `${row[1] || ""} ${row[0] || ""}`.trim(); }
 
-/** Column K: gender (F/G for girls, M/B for boys). Defaults to Boys if blank. */
 function parseGender(row) {
     if (!row) return "Boys";
     if (row[10] !== undefined && row[10] !== null) {
-        const raw = String(row[10]).trim();
-        if (raw) {
-            const u = raw.toUpperCase();
-            if (u === "F" || u === "FEMALE" || u === "G" || u === "GIRL" || u === "GIRLS") {
-                return "Girls";
-            }
-            return "Boys";
-        }
+        const raw = String(row[10]).trim().toUpperCase();
+        if (["F", "FEMALE", "G", "GIRL", "GIRLS"].includes(raw)) return "Girls";
     }
-    const name = buildName(row);
-    if (name && name.includes("(F)")) return "Girls";
     return "Boys";
-}
-
-function gradeSortKey(grade) {
-    return grade === null ? 999 : grade;
-}
-
-function formatGradeLabel(grade) {
-    return grade === null ? '—' : String(grade);
-}
-
-function buildName(row) {
-    const last = row[0] || "";
-    const first = row[1] || "";
-    return `${first} ${last}`.trim();
-}
-
-function cleanName(name) {
-    return name ? name.replace("(F)", "").trim() : "";
-}
-
-function getMileageValue(val) {
-    let num = parseFloat(val);
-    return isNaN(num) ? 0 : num;
 }
 
 function getStatusClass(val) {
@@ -605,9 +681,7 @@ function getStatusClass(val) {
 function timeToSeconds(timeStr) {
     if (!timeStr || timeStr === '--' || timeStr === '-' || timeStr === '0' || timeStr === '') return 999999;
     const parts = timeStr.toString().split(':');
-    if (parts.length === 2) {
-        return (parseFloat(parts[0]) * 60) + parseFloat(parts[1]);
-    }
+    if (parts.length === 2) return (parseFloat(parts[0]) * 60) + parseFloat(parts[1]);
     return parseFloat(timeStr);
 }
 
@@ -631,3 +705,194 @@ function updateTimestamp() {
     const el = document.getElementById('last-updated');
     if (el) el.textContent = `Synced with Google Sheets: ${timeString}`;
 }
+
+function isMissingTrackTime(val) {
+    if (val === undefined || val === null) return true;
+    const str = String(val).trim();
+    return str === '' || str === '-' || str === '--' || str === '0';
+}
+
+function normalizeNameForMatch(name) {
+    if (!name) return "";
+    return name.toString().toLowerCase().replace(/[^a-z0-9]/g, "").trim();
+}
+
+
+// --- REFIGURED DISTANCE DATA & PROGRESSION CHART ENGINE ---
+
+function getAthleteMeetData(athleteName) {
+    const searchNorm = normalizeNameForMatch(athleteName);
+    if (!searchNorm || !meetData || meetData.length === 0) return [];
+    return meetData.filter(row => {
+        const nameInRow = Array.isArray(row) ? row[0] : (row.name || '');
+        return nameInRow && normalizeNameForMatch(nameInRow) === searchNorm;
+    });
+}
+
+window.showAthleteChart = function(athleteName) {
+    if (!athleteName) return;
+
+    const athleteRaces = getAthleteMeetData(athleteName);
+    if (athleteRaces.length === 0) {
+        alert(`No meet results found for ${cleanName(athleteName)}.`);
+        return;
+    }
+
+    // 1. Unveil the Modal Elements safely
+    const modal = document.getElementById('chart-modal');
+    const overlay = document.getElementById('chart-overlay');
+
+    if (modal && overlay) {
+        modal.style.setProperty('display', 'block', 'important');
+        overlay.style.setProperty('display', 'block', 'important');
+        
+        const title = document.getElementById('chart-title');
+        if (title) title.textContent = cleanName(athleteName);
+    }
+
+    // 2. Scan and extract all unique distances this specific runner has competed in
+    const uniqueDistances = [...new Set(athleteRaces.map(row => {
+        const dist = Array.isArray(row) ? row[4] : row.distance;
+        return dist ? dist.toString().trim() : "";
+    }).filter(d => d !== ""))];
+
+    // Fallback default if distance cells are left completely blank in your spreadsheet row
+    if (uniqueDistances.length === 0) {
+        uniqueDistances.push("XC Race");
+    }
+
+    // 3. Clear existing wrapper selectors and inject clean navigation tabs
+    let wrapper = document.getElementById('chart-content-wrapper');
+    let tabContainer = document.getElementById('modal-tab-bar');
+    
+    if (!tabContainer) {
+        tabContainer = document.createElement('div');
+        tabContainer.id = 'modal-tab-bar';
+        tabContainer.className = 'modal-tabs';
+        wrapper.parentNode.insertBefore(tabContainer, wrapper);
+    }
+
+    // Render a button tab container dynamically matching their background profile
+    tabContainer.innerHTML = uniqueDistances.map((dist, idx) => `
+        <button class="tab-btn ${idx === 0 ? 'active' : ''}" onclick="window.switchChartDistance('${athleteName.replace(/'/g, "\\'")}', '${dist}', this)">
+            ${dist}
+        </button>
+    `).join('');
+
+    // 4. Draw the progression logic for the very first distance filter row
+    updateChartLogic(athleteRaces, uniqueDistances[0]);
+};
+
+/**
+ * Switchboard utility guiding tab selections inside your global window execution frame
+ */
+window.switchChartDistance = function(athleteName, selectedDistance, buttonElement) {
+    // Demote old active classes
+    const tabs = document.querySelectorAll('.tab-btn');
+    tabs.forEach(t => t.classList.remove('active'));
+    
+    // Promote selected tab indicator highlight
+    if (buttonElement) buttonElement.classList.add('active');
+
+    const athleteRaces = getAthleteMeetData(athleteName);
+    updateChartLogic(athleteRaces, selectedDistance);
+};
+
+function updateChartLogic(athleteRaces, targetDistance) {
+    if (typeof Chart === 'undefined') {
+        console.error("Chart.js library is not loaded.");
+        return;
+    }
+
+    // Filter results strictly matching the selected distance tab line
+    let plotData = athleteRaces.map(row => {
+        const meetName = Array.isArray(row) ? row[1] : row.meet;
+        const meetDate = Array.isArray(row) ? row[2] : row.date;
+        const timeStr = Array.isArray(row) ? row[3] : row.time;
+        const distanceLabel = Array.isArray(row) ? row[4] : "";
+
+        return {
+            meet: meetName || "Meet",
+            date: meetDate || "",
+            value: timeToSeconds(timeStr),
+            displayVal: timeStr,
+            distance: distanceLabel ? distanceLabel.trim() : "XC Race"
+        };
+    }).filter(d => {
+        // Match conditions: clean string validation against user target selection profile
+        const distanceMatches = (targetDistance === "XC Race") || (d.distance === targetDistance);
+        return distanceMatches && d.displayVal && d.displayVal !== '-' && d.displayVal !== '0' && d.value > 0 && d.value < 999999;
+    });
+
+    // Arrange historical points cleanly by date
+    plotData.sort((a, b) => parseMeetDate(a.date) - parseMeetDate(b.date));
+
+    const canvas = document.getElementById('progressionChart');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    
+    if (window.myChart instanceof Chart) window.myChart.destroy();
+    
+    if (plotData.length === 0) {
+        // Clear canvas if no valid times exist for this distance layout view
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        return;
+    }
+
+    window.myChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: plotData.map(d => d.date ? `${d.meet} (${d.date})` : d.meet),
+            datasets: [{
+                label: targetDistance,
+                data: plotData.map(d => d.value),
+                borderColor: 'chocolate',
+                backgroundColor: 'rgba(210, 105, 30, 0.2)',
+                borderWidth: 3,
+                tension: 0.2,
+                fill: true,
+                pointRadius: 6,
+                pointHoverRadius: 9,
+                pointBackgroundColor: 'chocolate'
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                y: {
+                    reverse: true, // Lower/faster race track values scale towards the top beautifully
+                    ticks: {
+                        callback: (v) => {
+                            const m = Math.floor(v / 60);
+                            const s = Math.floor(v % 60);
+                            return `${m}:${s < 10 ? '0' : ''}${s}`;
+                        }
+                    }
+                }
+            },
+            plugins: {
+                legend: { display: true },
+                tooltip: {
+                    callbacks: { label: (ctx) => `Time: ${plotData[ctx.dataIndex].displayVal}` }
+                }
+            }
+        }
+    });
+}
+
+window.closeChart = function() {
+    // Wipe tabs clear upon modal close to reset navigation layout templates cleanly
+    const tabContainer = document.getElementById('modal-tab-bar');
+    if (tabContainer) tabContainer.innerHTML = "";
+
+    document.getElementById('chart-modal').style.setProperty('display', 'none', 'important');
+    document.getElementById('chart-overlay').style.setProperty('display', 'none', 'important');
+};
+
+// --- SYSTEM SYNC AUTO-LOAD TRIGGER ---
+window.addEventListener("load", () => {
+    setTimeout(() => {
+        if (typeof resetPRs === "function") resetPRs();
+    }, 1000); 
+});
