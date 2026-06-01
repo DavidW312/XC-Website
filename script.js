@@ -197,8 +197,16 @@ function renderSeasonUI(totals, teamMiles, absences, possibleDays) {
         const grade = data.grade;
         const uniqueKey = `${gender}|${grade === null ? 'none' : grade}`;
 
-        if (!gradeLeaders[uniqueKey] || data.miles > gradeLeaders[uniqueKey].miles) {
-            gradeLeaders[uniqueKey] = { name, miles: data.miles, gender, grade };
+        if (!gradeLeaders[uniqueKey]) {
+            // Initialize if the key doesn't exist yet
+            gradeLeaders[uniqueKey] = { names: [name], miles: data.miles, gender, grade };
+        } else if (data.miles > gradeLeaders[uniqueKey].miles) {
+            // Found a new solo leader: overwrite miles and reset names array
+            gradeLeaders[uniqueKey].miles = data.miles;
+            gradeLeaders[uniqueKey].names = [name];
+        } else if (data.miles === gradeLeaders[uniqueKey].miles) {
+            // Found a tie: add this runner to the list
+            gradeLeaders[uniqueKey].names.push(name);
         }
     });
 
@@ -209,10 +217,14 @@ function renderSeasonUI(totals, teamMiles, absences, possibleDays) {
         })
         .forEach(leader => {
             const gradeLabel = leader.grade === null ? "Unassigned" : formatGradeLabel(leader.grade);
+            
+            // Clean all names in the array and join them with a comma
+            const cleanedNames = leader.names.map(name => cleanName(name)).join(', ');
+
             const itemHtml = `
             <p style="margin: 3px 0; font-size: 0.85rem;">
                 <span style="font-weight: bold;">${gradeLabel}:</span>
-                ${cleanName(leader.name)} (${leader.miles.toFixed(1)})
+                ${cleanedNames} (${leader.miles.toFixed(1)})
             </p>`;
 
             if (leader.gender === "Girls") {
