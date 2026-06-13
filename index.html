@@ -56,6 +56,75 @@
                         </div>
                     </div>
                 </div>
+
+                <div class="season-leaderboard-container">
+                
+                <div class="leaderboard-filters">
+                    <strong>Gender:</strong>
+
+                    <button
+                        class="filter-btn gender-filter-btn active"
+                        data-gender="all"
+                        onclick="setGenderFilter('all')">
+                        All
+                    </button>
+
+                    <button
+                        class="filter-btn gender-filter-btn"
+                        data-gender="Boys"
+                        onclick="setGenderFilter('Boys')">
+                        Boys
+                    </button>
+
+                    <button
+                        class="filter-btn gender-filter-btn"
+                        data-gender="Girls"
+                        onclick="setGenderFilter('Girls')">
+                        Girls
+                    </button>
+                </div>
+
+                <div class="filter-row">
+                    <strong>Grade:</strong>
+
+                    <button
+                        class="filter-btn grade-filter-btn active"
+                        data-grade="all"
+                        onclick="setGradeFilter('all')">
+                        All
+                    </button>
+
+                    <button
+                        class="filter-btn grade-filter-btn"
+                        data-grade="9"
+                        onclick="setGradeFilter(9)">
+                        Freshmen
+                    </button>
+
+                    <button
+                        class="filter-btn grade-filter-btn"
+                        data-grade="10"
+                        onclick="setGradeFilter(10)">
+                        Sophomores
+                    </button>
+
+                    <button
+                        class="filter-btn grade-filter-btn"
+                        data-grade="11"
+                        onclick="setGradeFilter(11)">
+                        Juniors
+                    </button>
+
+                    <button
+                        class="filter-btn grade-filter-btn"
+                        data-grade="12"
+                        onclick="setGradeFilter(12)">
+                        Seniors
+                    </button>
+                </div>
+                
+                </div>
+
                 <div id="season-leaderboard-container"></div>
             </section>
 

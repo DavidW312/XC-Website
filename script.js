@@ -6,6 +6,13 @@ const API_KEY = 'AIzaSyAijjbGyF0cY0BLgEa_LmkYjyL1UDnQVQ8';
 // --- GLOBAL DECLARATIONS & ENGINE STATES ---
 let currentWeekData = [];
 let originalWeekData = [];
+
+let seasonTotalsData = {};
+let leaderboardFilter = {
+    gender: "all",
+    grade: "all"
+}
+
 let meetData = [];
 let meetSortState = { column: null, ascending: true };
 
@@ -188,6 +195,8 @@ async function calculateSeasonAnalytics(weekNames) {
 }
 
 function renderSeasonUI(totals, teamMiles, absences, possibleDays) {
+    seasonTotalsData = totals;
+    
     const teamMilesEl = document.getElementById('total-team-miles');
     const healthEl = document.getElementById('attendance-stat');
 
@@ -251,12 +260,32 @@ function renderSeasonUI(totals, teamMiles, absences, possibleDays) {
     if (girlsCol) girlsCol.innerHTML = girlsLeadersHtml.join('');
     if (boysCol) boysCol.innerHTML = boysLeadersHtml.join('');
 
+    renderSeasonLeaderboard();
+}
+
+function renderSeasonLeaderboard() {
     const leaderboardContainer = document.getElementById('season-leaderboard-container');
     if (leaderboardContainer) {
-        const sorted = Object.entries(totals).sort((a, b) => b[1].miles - a[1].miles);
+
+        let athletes = Object.entries(seasonTotalsData);
+
+        athletes = athletes.filter(([name, data]) => {
+
+            const genderMatch =
+                leaderboardFilter.gender === "all" ||
+                data.gender === leaderboardFilter.gender;
+        
+            const gradeMatch =
+                leaderboardFilter.grade === "all" ||
+                data.grade === leaderboardFilter.grade;
+        
+            return genderMatch && gradeMatch;
+        });
         let html = `<table><thead><tr><th>Rank</th><th>Name</th><th>Grade</th><th>Miles</th><th>Missed(A/XA/INJ)</th></tr></thead><tbody>`;
 
-        sorted.forEach((entry, index) => {
+        athletes.sort((a, b) => b[1].miles - a[1].miles);
+
+        athletes.forEach((entry, index) => {
             html += `<tr>
                 <td>${index + 1}</td>
                 <td class="name-cell">${cleanName(entry[0])}</td>
@@ -278,6 +307,36 @@ function renderSeasonUI(totals, teamMiles, absences, possibleDays) {
     }
 }
 
+function updateLeaderboardFilterButtons() {
+
+    document
+        .querySelectorAll('[data-gender]')
+        .forEach(btn => {
+
+            btn.classList.remove('active');
+
+            if (
+                btn.dataset.gender ===
+                leaderboardFilter.gender
+            ) {
+                btn.classList.add('active');
+            }
+        });
+
+    document
+        .querySelectorAll('[data-grade]')
+        .forEach(btn => {
+
+            btn.classList.remove('active');
+
+            if (
+                btn.dataset.grade ===
+                String(leaderboardFilter.grade)
+            ) {
+                btn.classList.add('active');
+            }
+        });
+}
 
 async function fetchWeeklyData(tabName) {
     const container = document.getElementById('mileage-container');
@@ -385,6 +444,23 @@ window.resetSort = function() {
     renderMileageTable(currentWeekData);
 };
 
+window.setGenderFilter = function(gender) {
+    leaderboardFilter.gender = gender;
+    updateLeaderboardFilterButtons();
+    
+    console.log("Gender filter:", leaderboardFilter);
+    
+    renderSeasonLeaderboard();
+};
+
+window.setGradeFilter = function(grade) {
+    leaderboardFilter.grade = grade;
+    updateLeaderboardFilterButtons();
+
+    console.log("Grade filter:", leaderboardFilter);
+    
+    renderSeasonLeaderboard();
+};
 
 // --- PERSONAL RECORDS (PR) ENGINE ---
 

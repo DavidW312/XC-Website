@@ -845,3 +845,48 @@ th.sortable.active-desc::after {
     color: white;
     border-color: chocolate;
 }
+
+.leaderboard-filters {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 5px;
+
+    margin-bottom: 0px;
+    padding: 10px;
+}
+
+.filter-row {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 5px;
+
+    margin-bottom: 0px;
+    padding: 10px;
+}
+
+.filter-btn {
+    padding: 8px 16px;
+
+    border: none;
+    border-radius: 20px;
+
+    background: #f4e7df;
+    color: #8b4513;
+
+    font-weight: 600;
+    cursor: pointer;
+
+    transition: all 0.25s ease;
+}
+
+.filter-btn:hover {
+    background: #ecd4c8;
+    transform: translateY(-1px);
+}
+
+.filter-btn.active {
+    background: chocolate;
+    color: white;
+}
