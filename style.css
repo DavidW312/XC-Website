@@ -40,6 +40,54 @@ section {
     }
 }
 
+/* ==========================================================================
+   7. MOBILE RESPONSIVENESS (SMALL SCREENS)
+   ========================================================================== */
+
+/* Target Tablets and smaller laptops */
+@media (max-width: 900px) {
+    main {
+        display: flex !important;
+        flex-direction: column !important;
+        grid-template-columns: 1fr !important; /* Safety fallback */
+    }
+
+    /* Force every visible section to stack cleanly in a single column */
+    main > section, 
+    main > div,
+    .hidden-section {
+        grid-column: span 1 !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        box-sizing: border-box;
+    }
+}
+
+/* Target Phones specifically */
+@media (max-width: 600px) {
+    .insights-grid {
+        grid-template-columns: 1fr !important;
+    }
+    
+    .group-leaders-wide {
+        grid-column: span 1 !important;
+    }
+    
+    .gender-split-container {
+        grid-template-columns: 1fr !important;
+        gap: 15px;
+    }
+    
+    section {
+        width: 100% !important;
+        min-width: 100% !important;
+    }
+
+    .button-group {
+        flex-direction: column;
+    }
+}
+
 h2 {
     color: chocolate;
     border-bottom: 2px solid #fdf5e6;
