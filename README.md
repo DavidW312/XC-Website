@@ -8,6 +8,7 @@ A static website for cross country summer mileage and meet results (Google Sheet
 |-----|---------|
 | Any name containing **Week** (e.g. `Week 1`, `Summer Week 2`) | Weekly mileage |
 | **Race_Results** | Meet results |
+| **PRs** | PRs |
 
 ### Week tab columns
 
@@ -31,15 +32,20 @@ One row per athlete per meet. Everyone at a meet runs the same distance; the dis
 | Col | Field | Example |
 |-----|-------|---------|
 | A | Athlete name | Jane Doe |
-| B | Meet name | Husky Invite |
+| B | Meet name | Bulldog Invite |
 | C | Date (M/D/YY) | 9/14/26 |
 | D | Time | 19:42 |
 | E | Distance label | 3 Mile |
 
-## Local preview
+### PRs columns
 
-Open [index.html](index.html) in a browser, or use a simple static server.
+One row per athlete. Everyone's PRs are listed here
 
-## Future additions
-
-PR tracking and athlete progression charts can be added later without changing the mileage workflow.
+| Col | Field | Example |
+|-----|-------|---------|
+| A | Athlete name | Jane Doe |
+| B | 3 Mile | 19:42 |
+| C | 5K | 21:15 |
+| D | 2 Mile | 12:30 |
+| E | 3200m | 12:23 |
+| F | 1600m | 5:59 |
