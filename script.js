@@ -209,7 +209,12 @@ async function initDashboard() {
 
         const weekSheets = spreadsheet.sheets
             .map(s => s.properties.title)
-            .filter(title => title.includes("Week"));
+            .filter(title => title.includes("Week"))
+            .sort((a, b) => {
+                const numA = parseInt(a.match(/\d+/)?.[0] || 0);
+                const numB = parseInt(b.match(/\d+/)?.[0] || 0);
+                return numB - numA; // newest first
+            });
 
         selector.innerHTML = "";
         weekSheets.forEach(title => {
