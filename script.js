@@ -5,6 +5,8 @@ const API_KEY = 'AIzaSyAijjbGyF0cY0BLgEa_LmkYjyL1UDnQVQ8';
 
 const MASTER_SHEET_ID = "1p_4w2RODxODdMmu16FXdtiwDKAeCP6Ib4AihsI9rBj0";
 
+let spreadsheetCache = {};
+
 // --- GLOBAL DECLARATIONS & ENGINE STATES ---
 let currentWeekData = [];
 let originalWeekData = [];
@@ -141,6 +143,7 @@ async function initSeasonSelector() {
 }
 
 async function reloadDashboard() {
+    await new Promise(resolve => setTimeout(resolve, 500));
 
     currentWeekData = [];
     originalWeekData = [];
@@ -194,8 +197,15 @@ async function initDashboard() {
     const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}?key=${API_KEY}&t=${Date.now()}`;
 
     try {
-        const response = await fetch(url);
-        const spreadsheet = await response.json();
+        let spreadsheet;
+
+        if (spreadsheetCache[SHEET_ID]) {
+            spreadsheet = spreadsheetCache[SHEET_ID];
+        } else {
+            const response = await fetch(url);
+            spreadsheet = await response.json();
+            spreadsheetCache[SHEET_ID] = spreadsheet;
+        }
 
         const weekSheets = spreadsheet.sheets
             .map(s => s.properties.title)
@@ -700,7 +710,11 @@ async function fetchRaceResults() {
     try {
         const response = await fetch(url);
         const data = await response.json();
-        if (!data.values || data.values.length === 0) return;
+        if (!data.values || data.values.length === 0) {
+            console.warn("No Race_Results found");
+            meetData = [];
+            return;
+        }
 
         meetData = data.values;
 
@@ -753,7 +767,11 @@ window.displaySelectedMeet = function() {
     const meetRows = meetData.filter(row => row[1] === selectedMeet);
     const distanceLabel = meetRows.find(r => r[4] && String(r[4]).trim())?.[4] || "";
 
-    let html = `<div class="meet-summary"><h3>${selectedMeet}</h3>${distanceLabel ? `<p><strong>Distance:</strong> ${distanceLabel}</p>` : ""}</div>`;
+    let totalPerformances = 0;
+    let totalPRs = 0;
+
+    let html = "";
+
     html += `<table><thead><tr><th class="sortable" onclick="sortMeetResults(0)">Athlete</th><th class="sortable" onclick="sortMeetResults(1)">Time</th></tr></thead><tbody>`;
 
     if (meetRows.length === 0) {
@@ -769,18 +787,26 @@ window.displaySelectedMeet = function() {
 
         let raceTime = row[3] || "-";
 
+        if (
+            raceTime &&
+            raceTime !== "-" &&
+            raceTime !== "0"
+        ) {
+            totalPerformances++;
+        }
+
         // Match distance to PR column
         let prTime = "";
 
         const distance = (row[4] || "").toLowerCase();
 
-        if (distance.includes("3")) {
+        if (distance.includes("3 mile")) {
             prTime = athletePR[1];
         }
         else if (distance.includes("5k") || distance.includes("5000")) {
             prTime = athletePR[2];
         }
-        else if (distance.includes("2")) {
+        else if (distance.includes("2 mile")) {
             prTime = athletePR[3];
         }
         else if (distance.includes("3200")) {
@@ -793,6 +819,8 @@ window.displaySelectedMeet = function() {
         let displayTime = raceTime;
 
         if (isNewPR(raceTime, prTime)) {
+
+            totalPRs++;
 
             const delta = formatTimeDelta(prTime, raceTime);
 
@@ -812,7 +840,22 @@ window.displaySelectedMeet = function() {
     }
 
     html += "</tbody></table>";
-    container.innerHTML = html;
+
+    const prRate = totalPerformances > 0
+        ? ((totalPRs / totalPerformances) * 100).toFixed(1)
+        : 0;
+
+    const summaryHTML = `<div class="meet-summary">
+        <h3>${selectedMeet}</h3>
+        ${distanceLabel ? `<p><strong>Distance:</strong> ${distanceLabel}</p>` : ""}
+        <p>
+            <strong>PR Rate:</strong>
+            ${prRate}% 
+            (${totalPRs} PR${totalPRs === 1 ? "" : "s"} out of ${totalPerformances} races)
+        </p>
+    </div>`;
+
+    container.innerHTML = summaryHTML + html;
 };
 
 window.filterMeetResults = function() {
