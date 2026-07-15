@@ -1,7 +1,11 @@
 // Google Sheet ID: copy from docs.google.com/spreadsheets/d/{SHEET_ID}/edit
 // Required tabs: Week* (mileage; col J = grade, col K = gender), Race_Results (Name, Meet, Date, Time, Distance)
-const SHEET_ID = '1Y10L9EOvbB-8a3gjB-L9G5LMJ_Q70xDJsUGPlRcMHK4';
+let SHEET_ID = "";
 const API_KEY = 'AIzaSyAijjbGyF0cY0BLgEa_LmkYjyL1UDnQVQ8';
+
+const MASTER_SHEET_ID = "1p_4w2RODxODdMmu16FXdtiwDKAeCP6Ib4AihsI9rBj0";
+
+let spreadsheetCache = {};
 
 // --- GLOBAL DECLARATIONS & ENGINE STATES ---
 let currentWeekData = [];
@@ -29,11 +33,11 @@ const CHART_EVENT_CONFIGS = {
 
 // --- INITIALIZATION ---
 window.addEventListener("DOMContentLoaded", async () => {
-    await initDashboard();
-    await fetchRaceResults();
-    await fetchPRs();
-    displaySelectedMeet();
+
     initAdvancedToggleView();
+
+    await initSeasonSelector();
+
 });
 
 function initAdvancedToggleView() {
@@ -66,7 +70,7 @@ function initAdvancedToggleView() {
 
                 const allButton = document.querySelector('[data-section="all"]');
                 const allIndividualActive = [...buttons]
-                    .filter(b => b.dataset.section !== "all")
+                    .filter(b => b.dataset.section !== "all" && b.style.display !== "none")
                     .every(b => b.classList.contains("active"));
                 allButton.classList.toggle("active", allIndividualActive);
             }
@@ -82,17 +86,135 @@ function initAdvancedToggleView() {
     }
 }
 
+// Function for getting data from the master season index sheet
+async function loadAvailableSeasons() {
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${MASTER_SHEET_ID}/values/Season_Index!A2:C?key=${API_KEY}`;
+
+    const response = await fetch(url);
+    const data = await response.json();
+
+    return data.values || [];
+}
+
+// Function for creating the selector based on the seasons and ids in the master season index sheet
+async function initSeasonSelector() {
+
+    const selector = document.getElementById("season-selector");
+    const seasons = await loadAvailableSeasons();
+
+    selector.innerHTML = "";
+
+    seasons.forEach(row => {
+
+        const option = document.createElement("option");
+
+        option.value = row[1];       // Sheet ID
+        option.textContent = row[0]; // Year
+
+        selector.appendChild(option);
+
+    });
+
+    // Restore last season if possible
+    const saved = localStorage.getItem("selectedSeason");
+
+    if (saved && [...selector.options].some(o => o.value === saved)) {
+        selector.value = saved;
+    } else {
+        // Default to the last season in the list
+        selector.selectedIndex = selector.options.length - 1;
+    }
+
+    SHEET_ID = selector.value;
+
+    if (!SHEET_ID) {
+        console.error("No season selected.");
+        return;
+    }
+
+    await reloadDashboard();
+
+    selector.addEventListener("change", async function(){
+        SHEET_ID = this.value;
+        localStorage.setItem("selectedSeason", SHEET_ID);
+        await reloadDashboard();
+    });
+
+}
+
+async function reloadDashboard() {
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    currentWeekData = [];
+    originalWeekData = [];
+    seasonTotalsData = {};
+    meetData = [];
+    allDistancePRs = [];
+
+    await initDashboard();
+
+    // Load meet results only if this season has Race_Results
+    const hasResults = await sheetExists("Race_Results");
+
+    if (hasResults) {
+        await fetchRaceResults();
+    } else {
+        meetData = [];
+    }
+
+
+    // Load PRs only if this season has PRs
+    const hasPRs = await sheetExists("PRs");
+
+    if (hasPRs) {
+        await fetchPRs();
+    } else {
+        allDistancePRs = [];
+    }
+
+    setOptionalFeatureVisibility(hasPRs, hasResults);
+
+    displaySelectedMeet();
+}
+
+function setOptionalFeatureVisibility(hasPRs, hasResults) {
+
+    const prBtn = document.getElementById("pr-view-btn");
+    const resultsBtn = document.getElementById("results-view-btn");
+
+    const prSection = document.getElementById("pr-section");
+    const resultsSection = document.getElementById("results-section");
+
+    if (prBtn) prBtn.style.display = hasPRs ? "" : "none";
+    if (prSection) prSection.style.display = hasPRs ? "" : "none";
+
+    if (resultsBtn) resultsBtn.style.display = hasResults ? "" : "none";
+    if (resultsSection) resultsSection.style.display = hasResults ? "" : "none";
+}
+
 async function initDashboard() {
     const selector = document.getElementById('week-selector');
     const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}?key=${API_KEY}&t=${Date.now()}`;
 
     try {
-        const response = await fetch(url);
-        const spreadsheet = await response.json();
+        let spreadsheet;
+
+        if (spreadsheetCache[SHEET_ID]) {
+            spreadsheet = spreadsheetCache[SHEET_ID];
+        } else {
+            const response = await fetch(url);
+            spreadsheet = await response.json();
+            spreadsheetCache[SHEET_ID] = spreadsheet;
+        }
 
         const weekSheets = spreadsheet.sheets
             .map(s => s.properties.title)
-            .filter(title => title.includes("Week"));
+            .filter(title => title.includes("Week"))
+            .sort((a, b) => {
+                const numA = parseInt(a.match(/\d+/)?.[0] || 0);
+                const numB = parseInt(b.match(/\d+/)?.[0] || 0);
+                return numB - numA; // newest first
+            });
 
         selector.innerHTML = "";
         weekSheets.forEach(title => {
@@ -102,9 +224,9 @@ async function initDashboard() {
             selector.appendChild(option);
         });
 
-        selector.addEventListener('change', function() {
+        selector.onchange = function () {
             fetchWeeklyData(this.value);
-        });
+        }
 
         if (weekSheets.length > 0) fetchWeeklyData(weekSheets[0]);
         calculateSeasonAnalytics(weekSheets);
@@ -593,7 +715,11 @@ async function fetchRaceResults() {
     try {
         const response = await fetch(url);
         const data = await response.json();
-        if (!data.values || data.values.length === 0) return;
+        if (!data.values || data.values.length === 0) {
+            console.warn("No Race_Results found");
+            meetData = [];
+            return;
+        }
 
         meetData = data.values;
 
@@ -626,6 +752,12 @@ async function fetchRaceResults() {
 }
 
 window.displaySelectedMeet = function() {
+    if (meetData.length === 0) {
+        document.getElementById('meet-results-container').innerHTML =
+            "<p>No meet results available.</p>";
+        return;
+    }
+
     const selector = document.getElementById('xc-meet-selector');
     if (!selector) return;
     const selectedMeet = selector.value;
@@ -640,19 +772,95 @@ window.displaySelectedMeet = function() {
     const meetRows = meetData.filter(row => row[1] === selectedMeet);
     const distanceLabel = meetRows.find(r => r[4] && String(r[4]).trim())?.[4] || "";
 
-    let html = `<div class="meet-summary"><h3>${selectedMeet}</h3>${distanceLabel ? `<p><strong>Distance:</strong> ${distanceLabel}</p>` : ""}</div>`;
+    let totalPerformances = 0;
+    let totalPRs = 0;
+
+    let html = "";
+
     html += `<table><thead><tr><th class="sortable" onclick="sortMeetResults(0)">Athlete</th><th class="sortable" onclick="sortMeetResults(1)">Time</th></tr></thead><tbody>`;
 
     if (meetRows.length === 0) {
         html += `<tr><td colspan="2" style="text-align:center; padding:20px;">No results for this meet.</td></tr>`;
     } else {
         meetRows.forEach(row => {
-            html += `<tr><td class="name-cell">${cleanName(row[0] || "")}</td><td>${row[3] || '-'}</td></tr>`;
-        });
+
+        const athleteName = row[0] || "";
+
+        const athletePR = allDistancePRs.find(p =>
+            (p[0] || "").trim().toLowerCase() === athleteName.trim().toLowerCase()
+        ) || [];
+
+        let raceTime = row[3] || "-";
+
+        if (
+            raceTime &&
+            raceTime !== "-" &&
+            raceTime !== "0"
+        ) {
+            totalPerformances++;
+        }
+
+        // Match distance to PR column
+        let prTime = "";
+
+        const distance = (row[4] || "").toLowerCase();
+
+        if (distance.includes("3 mile")) {
+            prTime = athletePR[1];
+        }
+        else if (distance.includes("5k") || distance.includes("5000")) {
+            prTime = athletePR[2];
+        }
+        else if (distance.includes("2 mile")) {
+            prTime = athletePR[3];
+        }
+        else if (distance.includes("3200")) {
+            prTime = athletePR[4];
+        }
+        else if (distance.includes("1600") || distance.includes("mile")) {
+            prTime = athletePR[5];
+        }
+
+        let displayTime = raceTime;
+
+        if (isNewPR(raceTime, prTime)) {
+
+            totalPRs++;
+
+            const delta = formatTimeDelta(prTime, raceTime);
+
+            displayTime =
+            `<span class="pr-highlight">
+                ${raceTime} ⭐ 
+                <span class="pr-delta">${delta}</span>
+            </span>`;
+        }
+
+        html += `
+        <tr>
+            <td class="name-cell">${cleanName(athleteName)}</td>
+            <td>${displayTime}</td>
+        </tr>`;
+    });
     }
 
     html += "</tbody></table>";
-    container.innerHTML = html;
+
+    const prRate = totalPerformances > 0
+        ? ((totalPRs / totalPerformances) * 100).toFixed(1)
+        : 0;
+
+    const summaryHTML = `<div class="meet-summary">
+        <h3>${selectedMeet}</h3>
+        ${distanceLabel ? `<p><strong>Distance:</strong> ${distanceLabel}</p>` : ""}
+        <p>
+            <strong>PR Rate:</strong>
+            ${prRate}% 
+            (${totalPRs} PR${totalPRs === 1 ? "" : "s"} out of ${totalPerformances} races)
+        </p>
+    </div>`;
+
+    container.innerHTML = summaryHTML + html;
 };
 
 window.filterMeetResults = function() {
@@ -755,9 +963,17 @@ function getStatusClass(val) {
 }
 
 function timeToSeconds(timeStr) {
-    if (!timeStr || timeStr === '--' || timeStr === '-' || timeStr === '0' || timeStr === '') return 999999;
-    const parts = timeStr.toString().split(':');
-    if (parts.length === 2) return (parseFloat(parts[0]) * 60) + parseFloat(parts[1]);
+
+    if (!timeStr || timeStr === '--' || timeStr === '-' || timeStr === '0' || timeStr === '') {
+        return 999999;
+    }
+
+    const parts = String(timeStr).trim().split(':');
+
+    if (parts.length === 2) {
+        return (parseInt(parts[0]) * 60) + parseFloat(parts[1]);
+    }
+
     return parseFloat(timeStr);
 }
 
@@ -775,6 +991,43 @@ function parseMeetDate(dateStr) {
     return new Date(str);
 }
 
+// PR STUFF BELOW
+function isNewPR(raceTimeStr, prTimeStr) {
+    if (!raceTimeStr || raceTimeStr === '-' || raceTimeStr === '0' || raceTimeStr.trim() === '') {
+        return false;
+    }
+
+    const isFirstTime = (!prTimeStr || prTimeStr === '--' || prTimeStr.trim() === '');
+
+    if (isFirstTime) return true;
+
+    const raceSec = timeToSeconds(raceTimeStr);
+    const prSec = timeToSeconds(prTimeStr);
+
+    return raceSec <= prSec;
+}
+
+
+function formatTimeDelta(oldTime, newTime) {
+
+    if (!oldTime || oldTime === '--') {
+        return "Debut";
+    }
+
+    const delta = timeToSeconds(oldTime) - timeToSeconds(newTime);
+
+    if (delta <= 0) return "";
+
+    const minutes = Math.floor(delta / 60);
+    const seconds = Math.floor(delta % 60);
+    const milliseconds = Math.round((delta % 1) * 100);
+
+    const tenths = Math.round((delta % 1) * 10);
+
+    return `-${minutes}:${seconds.toString().padStart(2,'0')}.${tenths}`;
+}
+// PR STUFF ABOVE
+
 function updateTimestamp() {
     const now = new Date();
     const timeString = now.toLocaleTimeString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -791,6 +1044,27 @@ function isMissingTrackTime(val) {
 function normalizeNameForMatch(name) {
     if (!name) return "";
     return name.toString().toLowerCase().replace(/[^a-z0-9]/g, "").trim();
+}
+
+
+async function sheetExists(tabName) {
+
+    try {
+        const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}?fields=sheets.properties.title&key=${API_KEY}`;
+
+        const response = await fetch(url);
+        const data = await response.json();
+
+        if (!data.sheets) return false;
+
+        return data.sheets.some(sheet =>
+            sheet.properties.title === tabName
+        );
+
+    } catch (error) {
+        console.error("Sheet check failed:", error);
+        return false;
+    }
 }
 
 
