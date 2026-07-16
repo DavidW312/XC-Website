@@ -6,6 +6,8 @@ const API_KEY = 'AIzaSyAijjbGyF0cY0BLgEa_LmkYjyL1UDnQVQ8';
 const MASTER_SHEET_ID = "1p_4w2RODxODdMmu16FXdtiwDKAeCP6Ib4AihsI9rBj0";
 
 let spreadsheetCache = {};
+let weekDataCache = {};
+let dashboardLoadID = 0;
 
 // --- GLOBAL DECLARATIONS & ENGINE STATES ---
 let currentWeekData = [];
@@ -93,7 +95,12 @@ async function loadAvailableSeasons() {
     const response = await fetch(url);
     const data = await response.json();
 
-    return data.values || [];
+    if (!data.values) {
+        console.error("Season Index failed:", data);
+        throw new Error("Could not load seasons");
+    }
+
+    return data.values;
 }
 
 // Function for creating the selector based on the seasons and ids in the master season index sheet
@@ -135,15 +142,28 @@ async function initSeasonSelector() {
     await reloadDashboard();
 
     selector.addEventListener("change", async function(){
-        SHEET_ID = this.value;
+
+        SHEET_ID = this.value.trim();
+
         localStorage.setItem("selectedSeason", SHEET_ID);
+
+        spreadsheetCache = {};
+        weekDataCache = {};
+
+        currentWeekData = [];
+        originalWeekData = [];
+        seasonTotalsData = {};
+        meetData = [];
+        allDistancePRs = [];
+
         await reloadDashboard();
     });
 
 }
 
 async function reloadDashboard() {
-    await new Promise(resolve => setTimeout(resolve, 500));
+
+    const loadID = ++dashboardLoadID;
 
     currentWeekData = [];
     originalWeekData = [];
@@ -153,26 +173,17 @@ async function reloadDashboard() {
 
     await initDashboard();
 
-    // Load meet results only if this season has Race_Results
+    if (loadID !== dashboardLoadID) return;
+
     const hasResults = await sheetExists("Race_Results");
-
-    if (hasResults) {
-        await fetchRaceResults();
-    } else {
-        meetData = [];
-    }
-
-
-    // Load PRs only if this season has PRs
     const hasPRs = await sheetExists("PRs");
 
-    if (hasPRs) {
-        await fetchPRs();
-    } else {
-        allDistancePRs = [];
-    }
+    if (loadID !== dashboardLoadID) return;
 
     setOptionalFeatureVisibility(hasPRs, hasResults);
+
+    if (hasResults) await fetchRaceResults();
+    if (hasPRs) await fetchPRs();
 
     displaySelectedMeet();
 }
@@ -194,7 +205,6 @@ function setOptionalFeatureVisibility(hasPRs, hasResults) {
 
 async function initDashboard() {
     const selector = document.getElementById('week-selector');
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}?key=${API_KEY}&t=${Date.now()}`;
 
     try {
         let spreadsheet;
@@ -202,9 +212,13 @@ async function initDashboard() {
         if (spreadsheetCache[SHEET_ID]) {
             spreadsheet = spreadsheetCache[SHEET_ID];
         } else {
+            const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}?key=${API_KEY}`;
             const response = await fetch(url);
             spreadsheet = await response.json();
             spreadsheetCache[SHEET_ID] = spreadsheet;
+            spreadsheet.tabNames = spreadsheet.sheets.map(
+                s => s.properties.title
+            );
         }
 
         const weekSheets = spreadsheet.sheets
@@ -215,6 +229,9 @@ async function initDashboard() {
                 const numB = parseInt(b.match(/\d+/)?.[0] || 0);
                 return numB - numA; // newest first
             });
+        
+        console.log("CURRENT SHEET:", SHEET_ID);
+        console.log("ALL TABS:", spreadsheet.sheets.map(s => s.properties.title));
 
         selector.innerHTML = "";
         weekSheets.forEach(title => {
@@ -228,8 +245,11 @@ async function initDashboard() {
             fetchWeeklyData(this.value);
         }
 
-        if (weekSheets.length > 0) fetchWeeklyData(weekSheets[0]);
-        calculateSeasonAnalytics(weekSheets);
+        if (weekSheets.length > 0) {
+            await fetchWeeklyData(weekSheets[0]);
+        }
+
+        await calculateSeasonAnalytics(weekSheets);
     } catch (error) {
         console.error("Critical Init Error:", error);
     }
@@ -245,20 +265,33 @@ function normalizeWeekRow(row, genderCell) {
 }
 
 async function fetchWeekRows(tabName, startRow = 2) {
+
+    const cacheKey = `${SHEET_ID}_${tabName}`;
+
+    if (weekDataCache[cacheKey]) {
+        return weekDataCache[cacheKey];
+    }
+
     const enc = encodeURIComponent(`'${tabName}'`);
     const base = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${enc}`;
-    const [mainRes, kRes] = await Promise.all([
-        fetch(`${base}!A${startRow}:K?key=${API_KEY}`),
-        fetch(`${base}!K${startRow}:K?key=${API_KEY}`)
-    ]);
+    const mainRes = await fetch(`${base}!A${startRow}:K?key=${API_KEY}`);
+    
     const main = await mainRes.json();
-    const kCol = await kRes.json();
+
     const rows = main.values || [];
-    const kVals = kCol.values || [];
-    return rows.map((row, i) => normalizeWeekRow(row, kVals[i]?.[0]));
+
+    const result = rows.map(row =>
+        normalizeWeekRow(row, row[10])
+    );
+
+    weekDataCache[cacheKey] = result;
+
+    return result;
 }
 
 async function calculateSeasonAnalytics(weekNames) {
+    const requestSheetID = SHEET_ID;
+
     let seasonTotals = {};
     let totalTeamMiles = 0;
     let totalAbsences = 0;
@@ -312,6 +345,15 @@ async function calculateSeasonAnalytics(weekNames) {
             });
         });
     });
+
+    if (requestSheetID !== SHEET_ID) return;
+
+    renderSeasonUI(
+        seasonTotals,
+        totalTeamMiles,
+        totalAbsences,
+        totalActiveDaysCount
+    );
 
     renderSeasonUI(seasonTotals, totalTeamMiles, totalAbsences, totalActiveDaysCount);
 }
@@ -461,6 +503,9 @@ function updateLeaderboardFilterButtons() {
 }
 
 async function fetchWeeklyData(tabName) {
+
+    const requestSheetID = SHEET_ID;
+
     const container = document.getElementById('mileage-container');
     container.innerHTML = `<p>Loading ${tabName}...</p>`;
 
@@ -474,8 +519,11 @@ async function fetchWeeklyData(tabName) {
             originalWeekData = sortMileageRows([...mergedRows]);
             currentWeekData = [...originalWeekData];
 
+            if (requestSheetID !== SHEET_ID) return;
+
             renderMileageTable(currentWeekData);
             updateTimestamp();
+
         } else {
             container.innerHTML = `<p>No data found for ${tabName}.</p>`;
         }
@@ -1047,24 +1095,15 @@ function normalizeNameForMatch(name) {
 }
 
 
-async function sheetExists(tabName) {
+function sheetExists(tabName) {
 
-    try {
-        const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}?fields=sheets.properties.title&key=${API_KEY}`;
+    const spreadsheet = spreadsheetCache[SHEET_ID];
 
-        const response = await fetch(url);
-        const data = await response.json();
-
-        if (!data.sheets) return false;
-
-        return data.sheets.some(sheet =>
-            sheet.properties.title === tabName
-        );
-
-    } catch (error) {
-        console.error("Sheet check failed:", error);
+    if (!spreadsheet || !spreadsheet.tabNames) {
         return false;
     }
+
+    return spreadsheet.tabNames.includes(tabName);
 }
 
 
