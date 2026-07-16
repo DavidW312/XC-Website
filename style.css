@@ -581,7 +581,7 @@ thead tr:hover {
 }
 
 /* Maximum Heights for "Windows" */
-#mileage-container { max-height: 770px; }
+#mileage-container { max-height: 903px; }
 #season-leaderboard-container { max-height: 565px; }
 #pr-container { max-height: 850px; }
 #meet-results-container { max-height: 725px; min-height: 400px; }
@@ -937,4 +937,30 @@ th.sortable.active-desc::after {
 .filter-btn.active {
     background: chocolate;
     color: white;
+}
+
+#season-selector {
+    padding: 8px 5px 8px 5px;
+    border-radius: 8px;
+    border: 2px solid chocolate;
+    background-color: white;
+    color: #333;
+    font-size: 1rem;
+    font-weight: bold;
+    cursor: pointer;
+    appearance: auto;
+    
+    /* custom spacing/look */
+    box-shadow: 0 2px 5px rgba(0,0,0,0.15);
+    transition: 0.2s ease;
+}
+
+#season-selector:hover {
+    border-color: #8b4513;
+    box-shadow: 0 3px 8px rgba(0,0,0,0.2);
+}
+
+#season-selector:focus {
+    outline: none;
+    border-color: #d2691e;
 }
