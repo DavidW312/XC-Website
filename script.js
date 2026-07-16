@@ -84,7 +84,6 @@ function initAdvancedToggleView() {
 
 async function initDashboard() {
     const selector = document.getElementById('week-selector');
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}?key=${API_KEY}&t=${Date.now()}`;
 
     try {
         const response = await fetch(url);
@@ -106,8 +105,11 @@ async function initDashboard() {
             fetchWeeklyData(this.value);
         });
 
-        if (weekSheets.length > 0) fetchWeeklyData(weekSheets[0]);
-        calculateSeasonAnalytics(weekSheets);
+        if (weekSheets.length > 0) {
+            await fetchWeeklyData(weekSheets[0]);
+        }
+
+        await calculateSeasonAnalytics(weekSheets);
     } catch (error) {
         console.error("Critical Init Error:", error);
     }
@@ -123,20 +125,33 @@ function normalizeWeekRow(row, genderCell) {
 }
 
 async function fetchWeekRows(tabName, startRow = 2) {
+
+    const cacheKey = `${SHEET_ID}_${tabName}`;
+
+    if (weekDataCache[cacheKey]) {
+        return weekDataCache[cacheKey];
+    }
+
     const enc = encodeURIComponent(`'${tabName}'`);
     const base = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${enc}`;
-    const [mainRes, kRes] = await Promise.all([
-        fetch(`${base}!A${startRow}:K?key=${API_KEY}`),
-        fetch(`${base}!K${startRow}:K?key=${API_KEY}`)
-    ]);
+    const mainRes = await fetch(`${base}!A${startRow}:K?key=${API_KEY}`);
+    
     const main = await mainRes.json();
-    const kCol = await kRes.json();
+
     const rows = main.values || [];
-    const kVals = kCol.values || [];
-    return rows.map((row, i) => normalizeWeekRow(row, kVals[i]?.[0]));
+
+    const result = rows.map(row =>
+        normalizeWeekRow(row, row[10])
+    );
+
+    weekDataCache[cacheKey] = result;
+
+    return result;
 }
 
 async function calculateSeasonAnalytics(weekNames) {
+    const requestSheetID = SHEET_ID;
+
     let seasonTotals = {};
     let totalTeamMiles = 0;
     let totalAbsences = 0;
@@ -190,6 +205,15 @@ async function calculateSeasonAnalytics(weekNames) {
             });
         });
     });
+
+    if (requestSheetID !== SHEET_ID) return;
+
+    renderSeasonUI(
+        seasonTotals,
+        totalTeamMiles,
+        totalAbsences,
+        totalActiveDaysCount
+    );
 
     renderSeasonUI(seasonTotals, totalTeamMiles, totalAbsences, totalActiveDaysCount);
 }
@@ -339,6 +363,9 @@ function updateLeaderboardFilterButtons() {
 }
 
 async function fetchWeeklyData(tabName) {
+
+    const requestSheetID = SHEET_ID;
+
     const container = document.getElementById('mileage-container');
     container.innerHTML = `<p>Loading ${tabName}...</p>`;
 
@@ -352,8 +379,11 @@ async function fetchWeeklyData(tabName) {
             originalWeekData = sortMileageRows([...mergedRows]);
             currentWeekData = [...originalWeekData];
 
+            if (requestSheetID !== SHEET_ID) return;
+
             renderMileageTable(currentWeekData);
             updateTimestamp();
+
         } else {
             container.innerHTML = `<p>No data found for ${tabName}.</p>`;
         }
