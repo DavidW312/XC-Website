@@ -584,7 +584,14 @@ function renderMileageTable(rows) {
 
         sectionRows.forEach(row => {
             const name = buildName(row);
-            const totalMiles = getMileageValue(row[8]);
+            let totalMiles = getMileageValue(row[8]);
+
+            // Fallback: If Col I is blank or 0 (week in progress), calculate sum of M-S on the fly
+            if (totalMiles === 0) {
+                weekdayCols.forEach(colIdx => {
+                    totalMiles += getMileageValue(row[colIdx]);
+                });
+            }
 
             htmlContent += `<tr>
                 <td class="name-cell">${cleanName(name)}</td>`;
@@ -604,8 +611,17 @@ function renderMileageTable(rows) {
 }
 
 window.sortMileage = function() {
-    if (currentWeekData.length === 0) return;
-    currentWeekData.sort((a, b) => getMileageValue(b[8]) - getMileageValue(a[8]));
+    if (!currentWeekData || currentWeekData.length === 0) return;
+    currentWeekData.sort((a, b) => {
+        // Calculate dynamically if total column is blank
+        let milesA = getMileageValue(a[8]);
+        let milesB = getMileageValue(b[8]);
+
+        if (milesA === 0) [2,3,4,5,6,7].forEach(c => milesA += getMileageValue(a[c]));
+        if (milesB === 0) [2,3,4,5,6,7].forEach(c => milesB += getMileageValue(b[c]));
+
+        return milesB - milesA;
+    });
     renderMileageTable(currentWeekData);
 };
 
@@ -987,18 +1003,23 @@ window.resetMeetSort = function() {
 
 // --- UTILITY & HELPER FUNCTIONS ---
 function cleanName(name) { return name ? name.replace("(F)", "").trim() : ""; }
-function getMileageValue(val) { let num = parseFloat(val); return isNaN(num) ? 0 : num; }
+function getMileageValue(val) { 
+    if (!val || val === "" || val === "-" || val === "A" || val === "XA" || val === "INJ" || val === "P") return 0;
+    let num = parseFloat(val); 
+    return isNaN(num) ? 0 : num; 
+}
 function parseGrade(row) { if (!row || row[9] === undefined || row[9] === null) return null; const raw = String(row[9]).trim(); if (!raw) return null; const num = parseInt(raw, 10); return isNaN(num) ? null : num; }
 function gradeSortKey(grade) { return grade === null ? 999 : grade; }
-function formatGradeLabel(grade) { return grade === null ? '—' : String(grade); }
+function formatGradeLabel(grade) { 
+    return (grade === null || grade === undefined || grade === '') ? 'Unassigned' : String(grade); 
+}
 function buildName(row) { return `${row[1] || ""} ${row[0] || ""}`.trim(); }
 
 function parseGender(row) {
-    if (!row) return "Boys";
-    if (row[10] !== undefined && row[10] !== null) {
-        const raw = String(row[10]).trim().toUpperCase();
-        if (["F", "FEMALE", "G", "GIRL", "GIRLS"].includes(raw)) return "Girls";
-    }
+    if (!row || row[10] === undefined || row[10] === null) return "Boys";
+    const raw = String(row[10]).trim().toUpperCase();
+    if (["F", "FEMALE", "G", "GIRL", "GIRLS"].includes(raw)) return "Girls";
+    if (["M", "MALE", "B", "BOY", "BOYS"].includes(raw)) return "Boys";
     return "Boys";
 }
 
