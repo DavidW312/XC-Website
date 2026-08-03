@@ -257,7 +257,7 @@ async function initDashboard() {
 
 function normalizeWeekRow(row, genderCell) {
     const out = [...(row || [])];
-    while (out.length < 11) out.push("");
+    while (out.length < 12) out.push("");
     if (genderCell !== undefined && genderCell !== null && String(genderCell).trim() !== "") {
         out[10] = String(genderCell).trim();
     }
@@ -274,7 +274,7 @@ async function fetchWeekRows(tabName, startRow = 2) {
 
     const enc = encodeURIComponent(`'${tabName}'`);
     const base = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${enc}`;
-    const mainRes = await fetch(`${base}!A${startRow}:K?key=${API_KEY}`);
+    const mainRes = await fetch(`${base}!A${startRow}:L?key=${API_KEY}`);
     
     const main = await mainRes.json();
 
@@ -289,6 +289,25 @@ async function fetchWeekRows(tabName, startRow = 2) {
     return result;
 }
 
+function hasSundayColumn(row){
+    const genderColL = String(row[11] || "").trim().toUpperCase();
+    const isGenderInL = ["F", "FEMALE", "G", "GIRL", "GIRLS", "M", "MALE", "B", "BOY", "BOYS"].includes(genderColL);
+    
+    return isGenderInL;
+}
+
+// Get the column indices for a given row dynamically
+function getRowMapping(row) {
+    const isSevenDay = hasSundayColumn(row);
+    
+    return {
+        weekdayCols: isSevenDay ? [2, 3, 4, 5, 6, 7, 8] : [2, 3, 4, 5, 6, 7], // Mon-Sun vs Mon-Sat
+        totalIdx: isSevenDay ? 9 : 8,   // Col J vs Col I
+        gradeIdx: isSevenDay ? 10 : 9,  // Col K vs Col J
+        genderIdx: isSevenDay ? 11 : 10 // Col L vs Col K
+    };
+}
+
 async function calculateSeasonAnalytics(weekNames) {
     const requestSheetID = SHEET_ID;
 
@@ -297,7 +316,7 @@ async function calculateSeasonAnalytics(weekNames) {
     let totalAbsences = 0;
     let totalActiveDaysCount = 0;
 
-    const weekDaysCols = [2, 3, 4, 5, 6, 7];
+    // Fetch all weeks data first so 'allWeeksData' is defined
     const allWeeksData = await Promise.all(weekNames.map(name => fetchWeekRows(name)));
 
     allWeeksData.forEach(weekRows => {
@@ -306,6 +325,9 @@ async function calculateSeasonAnalytics(weekNames) {
         weekRows.forEach(row => {
             const name = buildName(row);
             if (!name) return;
+
+            // Dynamically get day columns and indices per row (handles Sunday if present)
+            const map = getRowMapping(row);
 
             if (!seasonTotals[name]) {
                 seasonTotals[name] = {
@@ -318,15 +340,15 @@ async function calculateSeasonAnalytics(weekNames) {
                     gender: parseGender(row)
                 };
             } else {
-                if (row[9] !== undefined && row[9] !== null && String(row[9]).trim() !== '') {
+                if (row[map.gradeIdx] !== undefined && row[map.gradeIdx] !== null && String(row[map.gradeIdx]).trim() !== '') {
                     seasonTotals[name].grade = parseGrade(row);
                 }
-                if (row[10] !== undefined && row[10] !== null && String(row[10]).trim() !== '') {
+                if (row[map.genderIdx] !== undefined && row[map.genderIdx] !== null && String(row[map.genderIdx]).trim() !== '') {
                     seasonTotals[name].gender = parseGender(row);
                 }
             }
 
-            weekDaysCols.forEach(col => {
+            map.weekdayCols.forEach(col => {
                 let val = row[col];
 
                 if (val === "A" || val === "INJ" || val === "XA") {
@@ -354,8 +376,6 @@ async function calculateSeasonAnalytics(weekNames) {
         totalAbsences,
         totalActiveDaysCount
     );
-
-    renderSeasonUI(seasonTotals, totalTeamMiles, totalAbsences, totalActiveDaysCount);
 }
 
 function renderSeasonUI(totals, teamMiles, absences, possibleDays) {
@@ -548,20 +568,30 @@ function sortMileageRows(rows) {
 
 function renderMileageTable(rows) {
     const container = document.getElementById('mileage-container');
-    const weekdayCols = [2, 3, 4, 5, 6, 7];
-    const colCount = 1 + weekdayCols.length + 1;
+    if (!rows || rows.length === 0) return;
+
+    // Detect if any row in this week uses the Sunday layout
+    const sampleRow = rows.find(r => buildName(r)) || rows[0];
+    const mapping = getRowMapping(sampleRow);
+    const isSevenDay = mapping.weekdayCols.length === 7;
+
+    const colCount = 1 + mapping.weekdayCols.length + 1;
 
     const genderSections = [
         { label: "Boys", gender: "Boys" },
         { label: "Girls", gender: "Girls" }
     ];
 
+    const dayHeaders = isSevenDay 
+        ? "<th>M</th><th>T</th><th>W</th><th>T</th><th>F</th><th>S</th><th>S</th>" 
+        : "<th>M</th><th>T</th><th>W</th><th>T</th><th>F</th><th>S</th>";
+
     let htmlContent = `
         <table class="mileage-table">
             <thead>
                 <tr>
                     <th>Name</th>
-                    <th>M</th><th>T</th><th>W</th><th>T</th><th>F</th><th>S</th>
+                    ${dayHeaders}
                     <th>Total</th>
                 </tr>
             </thead>
@@ -584,19 +614,20 @@ function renderMileageTable(rows) {
 
         sectionRows.forEach(row => {
             const name = buildName(row);
-            let totalMiles = getMileageValue(row[8]);
+            const rowMap = getRowMapping(row);
 
-            // Fallback: If Col I is blank or 0 (week in progress), calculate sum of M-S on the fly
+            let totalMiles = getMileageValue(row[rowMap.totalIdx]);
+
+            // Fallback: sum day columns if total column is blank
             if (totalMiles === 0) {
-                weekdayCols.forEach(colIdx => {
+                rowMap.weekdayCols.forEach(colIdx => {
                     totalMiles += getMileageValue(row[colIdx]);
                 });
             }
 
-            htmlContent += `<tr>
-                <td class="name-cell">${cleanName(name)}</td>`;
+            htmlContent += `<tr><td class="name-cell">${cleanName(name)}</td>`;
 
-            weekdayCols.forEach(colIdx => {
+            rowMap.weekdayCols.forEach(colIdx => {
                 const val = (row[colIdx] != null) ? String(row[colIdx]).trim() : '';
                 const cellClass = getStatusClass(val);
                 htmlContent += `<td class="${cellClass}">${val}</td>`;
@@ -613,12 +644,14 @@ function renderMileageTable(rows) {
 window.sortMileage = function() {
     if (!currentWeekData || currentWeekData.length === 0) return;
     currentWeekData.sort((a, b) => {
-        // Calculate dynamically if total column is blank
-        let milesA = getMileageValue(a[8]);
-        let milesB = getMileageValue(b[8]);
+        const mapA = getRowMapping(a);
+        const mapB = getRowMapping(b);
 
-        if (milesA === 0) [2,3,4,5,6,7].forEach(c => milesA += getMileageValue(a[c]));
-        if (milesB === 0) [2,3,4,5,6,7].forEach(c => milesB += getMileageValue(b[c]));
+        let milesA = getMileageValue(a[mapA.totalIdx]);
+        let milesB = getMileageValue(b[mapB.totalIdx]);
+
+        if (milesA === 0) mapA.weekdayCols.forEach(c => milesA += getMileageValue(a[c]));
+        if (milesB === 0) mapB.weekdayCols.forEach(c => milesB += getMileageValue(b[c]));
 
         return milesB - milesA;
     });
@@ -1008,16 +1041,27 @@ function getMileageValue(val) {
     let num = parseFloat(val); 
     return isNaN(num) ? 0 : num; 
 }
-function parseGrade(row) { if (!row || row[9] === undefined || row[9] === null) return null; const raw = String(row[9]).trim(); if (!raw) return null; const num = parseInt(raw, 10); return isNaN(num) ? null : num; }
+
 function gradeSortKey(grade) { return grade === null ? 999 : grade; }
 function formatGradeLabel(grade) { 
     return (grade === null || grade === undefined || grade === '') ? 'Unassigned' : String(grade); 
 }
 function buildName(row) { return `${row[1] || ""} ${row[0] || ""}`.trim(); }
 
+function parseGrade(row) {
+    if (!row) return null;
+    const mapping = getRowMapping(row);
+    const raw = String(row[mapping.gradeIdx] || "").trim();
+    if (!raw) return null;
+    const num = parseInt(raw, 10);
+    return isNaN(num) ? null : num;
+}
+
 function parseGender(row) {
-    if (!row || row[10] === undefined || row[10] === null) return "Boys";
-    const raw = String(row[10]).trim().toUpperCase();
+    if (!row) return "Boys";
+    const mapping = getRowMapping(row);
+    const raw = String(row[mapping.genderIdx] || "").trim().toUpperCase();
+    
     if (["F", "FEMALE", "G", "GIRL", "GIRLS"].includes(raw)) return "Girls";
     if (["M", "MALE", "B", "BOY", "BOYS"].includes(raw)) return "Boys";
     return "Boys";
