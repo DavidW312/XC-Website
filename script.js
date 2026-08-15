@@ -933,10 +933,11 @@ window.displaySelectedMeet = function() {
             </span>`;
         }
 
+        // Inside displaySelectedMeet():
         html += `
         <tr>
             <td class="name-cell">${cleanName(athleteName)}</td>
-            <td>${displayTime}</td>
+            <td data-time="${raceTime}">${displayTime}</td>
         </tr>`;
     });
     }
@@ -1011,7 +1012,10 @@ window.sortMeetResults = function(columnIndex) {
 function getSortValue(row, colIndex) {
     const cells = row.querySelectorAll('td');
     if (cells.length <= colIndex) return '';
-    let text = cells[colIndex].textContent.trim();
+    
+    // Read raw data-time if present, otherwise fall back to text content
+    let text = cells[colIndex].dataset.time || cells[colIndex].textContent.trim();
+    
     if (colIndex >= 1) return timeToSeconds(text) || 999999;
     return text;
 }
